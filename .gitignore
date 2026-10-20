@@ -1,0 +1,17 @@
+dist/
+build/
+**/Dados/
+**/Cache/
+**/Logs/
+**/Backups/
+**/roms/
+**/bios/
+**/Saves/
+*.dpapi
+*.state
+*.ps2
+*.dll
+*.exe
+*.iso
+*.chd
+*.bin
