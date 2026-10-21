@@ -1,17 +1,5 @@
 ﻿# Atualizacao exclusiva do frontend. Sem tokens ou escrita na biblioteca/base.
 . (Join-Path $PSScriptRoot 'Hashing.ps1')
-function Read-FrontendStatus([string]$Path){
-    $stream=$null;$reader=$null
-    try{
-        $sharing=[IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete
-        $stream=[IO.File]::Open($Path,[IO.FileMode]::Open,[IO.FileAccess]::Read,$sharing)
-        $reader=New-Object IO.StreamReader($stream,[Text.Encoding]::UTF8,$true)
-        return ($reader.ReadToEnd()|ConvertFrom-Json)
-    }catch{
-        if($_.Exception.GetBaseException() -is [IO.IOException]){return $null}
-        throw
-    }finally{if($reader){$reader.Dispose()}elseif($stream){$stream.Dispose()}}
-}
 function Get-FrontendVersionParts([string]$Version){
     if($Version -notmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-preview\.[1-9][0-9]*)?$'){throw 'Versao invalida.'}
     [pscustomobject]@{number=[version]($Version.Split('-')[0]);preview=$Version.Contains('-')}
@@ -38,7 +26,7 @@ function Read-FrontendSignedManifest([string]$EnvelopePath,[string]$PublicKeyPat
     $m=[Text.Encoding]::UTF8.GetString($bytes)|ConvertFrom-Json
     $version=Get-FrontendVersionParts $m.version
     if($m.schemaVersion -ne 1 -or $m.product -cne 'TarginoRetroStation.Hydra' -or $m.channel -cne 'stable' -or $version.preview){throw 'Manifesto nao e uma versao estavel deste produto.'}
-    if($m.fileName -cne ('TarginoRetroStation-'+$m.version+'-Setup.exe') -or $m.sha256 -notmatch '^[0-9A-Fa-f]{64}$' -or $m.size -lt 1024 -or $m.size -gt 64MB){throw 'Dados de pacote invalidos.'}
+    if($m.fileName -cne ('TarginoRetroStation-'+$m.version+'-Setup.exe') -or $m.sha256 -notmatch '^[0-9A-Fa-f]{64}$' -or $m.size -lt 1024 -or $m.size -gt 512MB){throw 'Dados de pacote invalidos.'}
     if($m.notes -isnot [string] -or $m.notes.Length -gt 8000){throw 'Notas invalidas.'}
     Assert-FrontendAssetUrl $m.url $m.version $m.fileName
     return $m

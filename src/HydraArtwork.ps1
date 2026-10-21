@@ -10,8 +10,7 @@ foreach($dir in @($media,(Join-Path $media 'Sistemas'),(Join-Path $media 'Capas'
 $requests=Get-Content -LiteralPath (Join-Path $data 'hydra-midia-pedidos.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $indexPath=Join-Path $data 'hydra-midia-indice.json'
 $state=@{}; $status=@{}
-$script:downloads=0; $script:pythonProcess=$null; $script:usePython=$false
-$script:assetTransport='WebClient';$script:assetTransportVersion=2
+$script:downloads=0; $script:assetTransportVersion=3
 $script:stateWriteClock=[Diagnostics.Stopwatch]::StartNew()
 $script:progressWriteClock=[Diagnostics.Stopwatch]::StartNew()
 function Asset-RetryDue($entry){
@@ -50,49 +49,9 @@ function Save-Progress([string]$phase,[int]$done,[int]$total){
     $script:progressWriteClock.Restart()
 }
 function Get-Asset([string]$url,[string]$path){
-    if(Test-Path -LiteralPath $path){return}
-    if($url -notmatch '^https://' -or $url.IndexOfAny([char[]]@('"',"`r","`n")) -ge 0){throw 'Endereco de arte invalido.'}
-    $tmp=$path+'.download'
-    $errors=New-Object Collections.Generic.List[string]
-    $transports=@($script:assetTransport)+@('WebClient','WinHTTP','Curl' | Where-Object {$_ -ne $script:assetTransport})
-    try{
-        foreach($transport in $transports){
-            try{
-                switch($transport){
-                    'WebClient'{
-                        $web=NewHydraMetadataWebClient
-                        try{$web.Headers['User-Agent']='TarginoRetroStation/1.4.2';$web.DownloadFile($url,$tmp)}finally{$web.Dispose()}
-                    }
-                    'WinHTTP'{
-                        $http=New-Object -ComObject WinHttp.WinHttpRequest.5.1
-                        try{
-                            $http.SetTimeouts(5000,10000,15000,15000);$http.Option(9)=2048
-                            $http.Open('GET',$url,$false);$http.SetRequestHeader('User-Agent','TarginoRetroStation/1.4.2');$http.Send()
-                            if($http.Status -ne 200){throw ('HTTP '+$http.Status)}
-                            $body=[byte[]]$http.ResponseBody
-                            if($body.Length -gt 16MB){throw 'Arquivo de arte maior que 16 MB.'}
-                            [IO.File]::WriteAllBytes($tmp,$body)
-                        }finally{[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($http)}
-                    }
-                    'Curl'{
-                        $curl=Join-Path $env:SystemRoot 'System32\curl.exe'
-                        if(-not [IO.File]::Exists($curl)){throw 'curl do Windows indisponivel.'}
-                        $pi=New-Object Diagnostics.ProcessStartInfo -Property @{FileName=$curl;UseShellExecute=$false;CreateNoWindow=$true;RedirectStandardError=$true}
-                        $pi.Arguments='--fail --location --proto =https --proto-redir =https --tlsv1.2 --connect-timeout 10 --max-time 25 --max-filesize 16777216 --silent --show-error --output "'+$tmp+'" "'+$url+'"'
-                        $process=[Diagnostics.Process]::Start($pi)
-                        try{$message=$process.StandardError.ReadToEnd();$process.WaitForExit();if($process.ExitCode -ne 0){throw ('curl '+$process.ExitCode+': '+$message.Trim())}}finally{$process.Dispose()}
-                    }
-                }
-                $length=(Get-Item -LiteralPath $tmp).Length
-                if($length -eq 0 -or $length -gt 16MB){throw 'Resposta de arte vazia ou maior que 16 MB.'}
-                [IO.File]::Move($tmp,$path);$script:downloads++;$script:assetTransport=$transport;return
-            }catch{
-                $detail=$_.Exception.Message;$errors.Add($transport+': '+$detail)
-                if($detail -match '\b(?:404|410)\b'){break}
-            }
-        }
-        throw ('Download de arte falhou. '+($errors -join ' | '))
-    }finally{if([IO.File]::Exists($tmp)){[IO.File]::Delete($tmp)}}
+    if([IO.File]::Exists($path)){return}
+    Receive-HydraMedia $url $path
+    $script:downloads++
 }
 function Normalize-Title([string]$name){
     $name=$name -replace '\.[^.]+$',''
@@ -245,6 +204,5 @@ try {
     Save-State -Force
     Save-Progress 'Concluido' $items.Count $items.Count
 }finally{
-    if($script:pythonProcess){$script:pythonProcess.StandardInput.Close();[void]$script:pythonProcess.WaitForExit(2000);$script:pythonProcess.Dispose()}
     $lock.ReleaseMutex();$lock.Dispose()
 }

@@ -1,4 +1,5 @@
 ﻿# Local-first metadata. No credentials ship with the launcher.
+. (Join-Path $PSScriptRoot 'MediaTransport.ps1')
 function NewHydraMetadataWebClient {
     if(-not ('TarginoTimedWebClient' -as [type])){
         Add-Type -TypeDefinition @'

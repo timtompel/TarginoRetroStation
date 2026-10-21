@@ -1,7 +1,7 @@
 ﻿$ErrorActionPreference='Stop'
 $project=Split-Path $PSScriptRoot;$out=Join-Path $project 'dist'
 Add-Type -AssemblyName System.IO.Compression,System.IO.Compression.FileSystem
-$zipPath=Join-Path $out 'TarginoRetroStation-1.5.1-Fontes.zip'
+$zipPath=Join-Path $out 'TarginoRetroStation-1.5.2-Fontes.zip'
 $stream=[IO.File]::Open($zipPath,[IO.FileMode]::CreateNew)
 $zip=New-Object IO.Compression.ZipArchive($stream,[IO.Compression.ZipArchiveMode]::Create)
 try{

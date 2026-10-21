@@ -1,10 +1,10 @@
 ﻿# Public presentation and help. No privileged settings or credentials here.
-$script:TarginoWelcomeVersion='1.5.1'
+$script:TarginoWelcomeVersion='1.5.2'
 $script:TarginoChannelUrl='https://www.youtube.com/@targino.socialmedia'
 function TarginoWelcomeContent {
     @(
         @{Tab='Apresentação';Title='Sua biblioteca. Seu controle. Seu jeito de jogar.';Banner=$true;Body=@'
-Bem-vindo ao Targino RetroStation 1.5.1!
+Bem-vindo ao Targino RetroStation 1.5.2!
 
 Um complemento visual independente para organizar e iniciar os jogos da sua instalação do Hydra. Escolha o sistema, encontre o jogo e entre na diversão com teclado, mouse ou controle.
 
@@ -81,38 +81,24 @@ As opções de fontes de dados e cache estão em Personalizar e Filtros. Uma cha
 ATUALIZAR O COMPLEMENTO
 Use Filtros > Verificar atualizações do RetroStation. A consulta automática ocorre diariamente em segundo plano; você confirma antes de instalar. Só releases estáveis assinadas do repositório TarginoRetroStation são aceitas. Seus dados são preservados e os arquivos substituídos recebem backup.
 '@}
-        @{Tab='Novidades';Title='O que mudou: 1.5.0 → 1.5.1 estável';Body=@'
-TARGINO RETROSTATION
-Novo nome e identificador próprios, sem misturar com o launcher de recompilados do Arquivista. Avatar e banner do Targino foram mantidos.
+        @{Tab='Novidades';Title='O que mudou: 1.5.1 → 1.5.2';Body=@'
+INSTALADOR WEB
+Baixa somente a ultima versao estavel, confere assinatura e hash e oferece Instalar. Possui cancelamento e nova tentativa. O Setup offline permanece disponivel; nao e atualizacao diferencial.
 
-ATUALIZAÇÃO ONLINE EXCLUSIVA
-Consulta em segundo plano, com as opcoes Atualizar agora e Agora nao. Nada e instalado sem confirmacao. Apenas releases estáveis do RetroStation, com assinatura RSA-SHA256, tamanho e hash conferidos. Jogos devem estar fechados. Hydra, cores, ROMs, BIOS e saves não são atualizados por esse mecanismo.
+INSTALACAO MAIS SEGURA
+Arquivos sao gravados em temporarios e verificados antes da substituicao. Reinstalar nao duplica backups de arquivos identicos. Backups anteriores e dados pessoais sao preservados.
 
-MANUAL OFFLINE
-Filtros > Manual do RetroStation traz instalação, controles, música, artes, BIOS, CUE/BIN, saves, janela para OBS e diagnóstico. Também pode ser impresso pelo navegador.
+LIMPEZA DA BASE
+Retirados UpdateWinPort, campos antigos de atualizacao, adicao em massa de recompilados e instalacao de runtimes de jogos. A biblioteca continua compartilhando componentes visuais da base original.
 
-MIGRAÇÃO OPCIONAL
-O instalador pode copiar preferências, favoritos e mídia do antigo complemento TarginoLauncher para Hydra na mesma raiz. A pasta anterior e reaproveitada ou consolidada, evitando duplicar as artes. Diferencas ficam em backup verificado. O Arquivista nao e migrado.
+ARTES SEM PYTHON
+Capas, capturas e metadados usam alternativas HTTPS nativas do Windows, sem depender de Python ou Codex.
 
-MANTIDO DA 1.4.2
-O download de artes possui alternativas nativas do Windows para falhas do transporte inicial, sem depender de uma instalação de Python. Certificados HTTPS continuam sendo verificados.
+FILTROS E CACHE
+Instalados/Nao instalados foram retirados; configuracoes antigas retornam a Todos os jogos. A limpeza conserva tres sessoes de download recentes e so retira sessoes concluidas ha mais de 30 dias, sem processos ativos ou arquivos desconhecidos. Nao apaga artes, backups, ROMs, BIOS ou saves.
 
-RECUPERAÇÃO DAS TENTATIVAS ANTIGAS
-Erros registrados pelo mecanismo anterior são tentados novamente na próxima abertura. Artes que já foram baixadas são preservadas e não precisam ser buscadas outra vez. Novos erros respeitam um intervalo de 30 minutos; o menu “Tentar novamente artes pendentes” permite uma tentativa explícita antes disso.
-
-ÍNDICE DE MÍDIAS E CONCORRÊNCIA
-Um arquivo temporariamente bloqueado durante gravação não é mais anunciado como corrompido. A leitura permite substituição segura do índice, e as gravações do processo de artes foram agrupadas para reduzir disputas.
-
-STATUS MAIS CLARO
-A interface diferencia artes salvas, falhas de download e títulos sem correspondência. Não deve dizer que todas as artes estão salvas quando existem apenas imagens substitutas. O índice de mídia guarda os detalhes dos erros para diagnóstico.
-
-O QUE CONTINUA IGUAL
-Formato manual de janela, memória dos ajustes, música, retorno à biblioteca e opções PS2/Neo Geo. Nenhuma ROM, core, BIOS ou configuração de jogo é substituída por esta correção.
-
-COMO RECUPERAR AS ARTES
-Feche o launcher e atualize na mesma pasta do Hydra. Reabra com internet e aguarde o processo em segundo plano. Se necessário, entre em Filtros e use “Tentar novamente artes pendentes”. A disponibilidade e a cobertura das fontes externas continuam podendo variar.
-
-Comparação com a última distribuição estável para Hydra, 1.4.2. A correspondência de títulos e a compatibilidade dos cores permanecem sujeitas às mesmas limitações; esta versão não promete corrigir o PS2 Software.
+MANTIDO
+Big Picture, retorno a biblioteca, musica, janela para OBS e modos PS2/Neo Geo. Limitações dos cores permanecem: esta versao nao promete corrigir PS2 Software ou suporte de hardware.
 '@}
         @{Tab='Créditos';Title='Targino.SocialMedia — tecnologia e jogos retro';Banner=$true;Body=@'
 TarginoRetroStation • Projeto e identidade: Targino.SocialMedia.
@@ -147,14 +133,14 @@ function TarginoWelcomeInput([string]$key,$dialog){
     }
 }
 function New-TarginoWelcomeDialog($state){
-    $dialog=New-Object Windows.Forms.Form -Property @{Text='TarginoRetroStation 1.5.1 — Apresentação e ajuda';ClientSize='1000,740';MinimumSize='850,680';StartPosition='CenterParent';BackColor=[Drawing.Color]::FromArgb(10,18,31);ForeColor=[Drawing.Color]::White;Font=(New-Object Drawing.Font('Segoe UI',11));KeyPreview=$true;MinimizeBox=$false}
+    $dialog=New-Object Windows.Forms.Form -Property @{Text='TarginoRetroStation 1.5.2 — Apresentação e ajuda';ClientSize='1000,740';MinimumSize='850,680';StartPosition='CenterParent';BackColor=[Drawing.Color]::FromArgb(10,18,31);ForeColor=[Drawing.Color]::White;Font=(New-Object Drawing.Font('Segoe UI',11));KeyPreview=$true;MinimizeBox=$false}
     $header=New-Object Windows.Forms.Panel -Property @{Dock='Top';Height=104;BackColor=[Drawing.Color]::FromArgb(17,34,56)}
     $avatar=New-Object Windows.Forms.PictureBox -Property @{Left=16;Top=7;Width=88;Height=88;SizeMode='Zoom'}
     $owned=New-Object 'Collections.Generic.List[Drawing.Image]'
     $avatarPath=Join-Path $Arq 'Marca\avatar.png'
     if([IO.File]::Exists($avatarPath)){$source=[Drawing.Image]::FromFile($avatarPath);try{$avatar.Image=New-Object Drawing.Bitmap($source);$owned.Add($avatar.Image)}finally{$source.Dispose()}}
     $title=New-Object Windows.Forms.Label -Property @{Text='TarginoRetroStation';Left=120;Top=17;Width=650;Height=40;Font=(New-Object Drawing.Font('Segoe UI',25,[Drawing.FontStyle]::Bold));ForeColor=[Drawing.Color]::FromArgb(100,195,255)}
-    $subtitle=New-Object Windows.Forms.Label -Property @{Text='1.5.1 ESTÁVEL   •   Complemento para o Hydra   •   Por Targino.SocialMedia';Left=122;Top=64;Width=830;Height=28;Font=(New-Object Drawing.Font('Segoe UI',10))}
+    $subtitle=New-Object Windows.Forms.Label -Property @{Text='1.5.2 ESTÁVEL   •   Complemento para o Hydra   •   Por Targino.SocialMedia';Left=122;Top=64;Width=830;Height=28;Font=(New-Object Drawing.Font('Segoe UI',10))}
     $header.Controls.AddRange(@($avatar,$title,$subtitle))
     $tabs=New-Object Windows.Forms.TabControl -Property @{Dock='Fill';Padding=(New-Object Drawing.Point(17,9))}
     foreach($content in @(TarginoWelcomeContent)){

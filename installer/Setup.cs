@@ -13,33 +13,10 @@ using System.Windows.Forms;
 
 [assembly: AssemblyTitle("Instalador TarginoRetroStation")]
 [assembly: AssemblyDescription("Complemento visual para uma instalacao existente do Hydra")]
-#if ASPECT_TEST
-[assembly: AssemblyVersion("1.4.1.1")]
-[assembly: AssemblyFileVersion("1.4.1.1")]
-#elif STABLE_RELEASE
-[assembly: AssemblyVersion("1.5.1.0")]
-[assembly: AssemblyFileVersion("1.5.1.0")]
-#elif LIVE_TEST
-[assembly: AssemblyVersion("1.4.0.11")]
-[assembly: AssemblyFileVersion("1.4.0.11")]
-#elif LOCAL_FIRST
-[assembly: AssemblyVersion("1.4.0.4")]
-[assembly: AssemblyFileVersion("1.4.0.4")]
-#elif VISUAL_TEST
-[assembly: AssemblyVersion("1.4.0.2")]
-[assembly: AssemblyFileVersion("1.4.0.2")]
-#elif RELEASE_CANDIDATE
-[assembly: AssemblyVersion("1.4.0.1")]
-[assembly: AssemblyFileVersion("1.4.0.1")]
-#elif PS2_TEST
-[assembly: AssemblyVersion("1.3.1.0")]
-[assembly: AssemblyFileVersion("1.3.1.0")]
-#else
-[assembly: AssemblyVersion("1.3.0.0")]
-[assembly: AssemblyFileVersion("1.3.0.0")]
-#endif
+[assembly: AssemblyVersion("1.5.2.0")]
+[assembly: AssemblyFileVersion("1.5.2.0")]
 [assembly: AssemblyProduct("TarginoRetroStation")]
-[assembly: AssemblyInformationalVersion("1.5.1")]
+[assembly: AssemblyInformationalVersion("1.5.2")]
 public class PackageFile { public string Path {get;set;} public string Sha256 {get;set;} }
 public class PackageManifest { public string Version {get;set;} public PackageFile[] Files {get;set;} }
 public class Installer : Form
@@ -76,23 +53,7 @@ public class Installer : Form
     }
     Installer()
     {
-#if ASPECT_TEST
-        Text="TarginoRetroStation 1.4.1 - TESTE DE PROPORCAO 1";
-#elif STABLE_RELEASE
-        Text="Instalar Targino RetroStation 1.5.1";
-#elif LIVE_TEST
-        Text="TarginoRetroStation 1.4.0 - RETORNO E MUSICA - TESTE 7";
-#elif LOCAL_FIRST
-        Text="TarginoRetroStation 1.4.0 - CACHE LOCAL - TESTE 2";
-#elif VISUAL_TEST
-        Text="TarginoRetroStation 1.4.0 - TESTE VISUAL 1";
-#elif RELEASE_CANDIDATE
-        Text="TarginoRetroStation 1.4.0 RC2 - compatibilidade Hydra";
-#elif PS2_TEST
-        Text="TarginoRetroStation 1.3.1 - TESTE PS2";
-#else
-        Text="Instalar Targino RetroStation 1.3.0";
-#endif
+        Text="Instalar Targino RetroStation 1.5.2";
         Size=new Size(740,490); MinimumSize=Size; MaximumSize=Size;
         Icon=Icon.ExtractAssociatedIcon(Assembly.GetExecutingAssembly().Location);
         StartPosition=FormStartPosition.CenterScreen; FormBorderStyle=FormBorderStyle.FixedDialog; MaximizeBox=false;
@@ -188,6 +149,8 @@ public class Installer : Form
         migration.Begin();
         var written=new List<string>();var backed=new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase);
         var preservedBrand=new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var expected=new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase);
+        foreach(var file in manifest.Files)expected.Add(file.Path.Replace('\\','/'),file.Sha256);
         try {
             using(var stream=Assembly.GetExecutingAssembly().GetManifestResourceStream("hydra.payload.zip"))
             using(var zip=new ZipArchive(stream,ZipArchiveMode.Read)) {
@@ -197,15 +160,27 @@ public class Installer : Form
                     string destination=Path.GetFullPath(Path.Combine(root,entryName.Replace('/',Path.DirectorySeparatorChar)));
                     if(!destination.StartsWith(root+Path.DirectorySeparatorChar,StringComparison.OrdinalIgnoreCase))throw new Exception("Caminho invalido no pacote.");
                     if(!(entryName.StartsWith("TarginoRetroStation/",StringComparison.Ordinal)||entryName=="Abrir-TarginoRetroStation.cmd"))throw new Exception("O pacote tentou gravar fora do complemento.");
+                    AtomicInstall.AssertLocalParents(root,destination);
                     string parent=Path.GetDirectoryName(destination);Directory.CreateDirectory(parent);
                     if(entryName.StartsWith("TarginoRetroStation/Marca/",StringComparison.Ordinal) && File.Exists(destination)){preservedBrand.Add(destination);continue;}
-                    if(File.Exists(destination)){string copy=Path.Combine(backup,entryName.Replace('/',Path.DirectorySeparatorChar));Directory.CreateDirectory(Path.GetDirectoryName(copy));File.Copy(destination,copy,false);backed[destination]=copy;}
-                    using(var input=entry.Open())using(var output=File.Create(destination))input.CopyTo(output);
-                    written.Add(destination);count++;Report(report,5+count*55/Math.Max(1,zip.Entries.Count),"Instalando "+Path.GetFileName(destination));
+                    string expectedHash;
+                    if(!expected.TryGetValue(entryName,out expectedHash))throw new Exception("Arquivo fora do manifesto: "+entryName);
+                    if(File.Exists(destination)&&Hash(destination).Equals(expectedHash,StringComparison.OrdinalIgnoreCase))continue;
+                    if(File.Exists(destination)){string copy=Path.Combine(backup,entryName.Replace('/',Path.DirectorySeparatorChar));AtomicInstall.AssertLocalParents(root,copy);Directory.CreateDirectory(Path.GetDirectoryName(copy));File.Copy(destination,copy,false);backed[destination]=copy;}
+                    written.Add(destination);
+                    using(var input=entry.Open())AtomicInstall.Write(input,destination,expectedHash);
+                    count++;Report(report,5+count*55/Math.Max(1,zip.Entries.Count),"Instalando "+Path.GetFileName(destination));
                 }
             }
             foreach(var file in manifest.Files){string path=Path.Combine(root,file.Path.Replace('/',Path.DirectorySeparatorChar));if(!preservedBrand.Contains(path)&&!Hash(path).Equals(file.Sha256,StringComparison.OrdinalIgnoreCase))throw new Exception("Arquivo nao passou na verificacao: "+file.Path);}
             migration.MergeAndReanchor();
+            string obsolete=Path.Combine(addon,"hydra-media-transport.py");
+            if(File.Exists(obsolete)&&Hash(obsolete)=="349cf501deddb0ba54c3638f562d43423cf01865162ffa891383d5f76de3b5d1"){
+                string retired=Path.Combine(backup,@"Obsoletos\hydra-media-transport.py");
+                AtomicInstall.AssertLocalParents(root,obsolete);AtomicInstall.AssertLocalParents(root,retired);
+                Directory.CreateDirectory(Path.GetDirectoryName(retired));backed[obsolete]=retired;written.Add(obsolete);
+                File.Move(obsolete,retired);
+            }
             string data=Path.Combine(addon,"Dados");Directory.CreateDirectory(data);
             string layout=Path.Combine(data,"layout.json");
             if(!File.Exists(layout)){

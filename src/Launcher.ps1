@@ -1,5 +1,5 @@
 ﻿Add-Type -AssemblyName System.Windows.Forms, System.Drawing
-$AppVer = '1.5.1'
+$AppVer = '1.5.2'
 $script:T0 = [Diagnostics.Stopwatch]::StartNew()      # tempo de abertura (vai para o log e para o diagnóstico)
 # O Launcher.ps1 fica em TarginoRetroStation\; a pasta do launcher ($Root) é a de cima (onde ficam só o executável e Jogos\).
 #  Tudo é relativo a $Root: a pasta pode ser copiada para outro HD ou renomeada.
@@ -253,7 +253,6 @@ $S = @{ Title = 'Launcher'; Accent = '#1E90FF'; Zoom = 2; Maximized = $false; Pa
         CoverS1 = 128; CoverS2 = 180; CoverS3 = 256; GapH = 20; GapV = 14; PadX = 24; PadY = 20; GridCenter = $false; CoverFit = 'Preencher'
         NameLines = 2; NameSize = 9; NameGap = 6; NotInstalled = 'Preto e branco'; DimNotInst = 60; DimInstalled = 0; SelBright = $true; SmoothScroll = $true; InstRecheckSec = 60
         CoverDir = ''; ShotDir = ''; CoverPattern = '{Alt}|{Nome}|{Id}'; ShotPattern = '{Alt}|{Nome}|{Id}'; ImgExts = 'png,jpg,jpeg,bmp,gif'; ImgLoose = $true
-        UpdUrl = ''; UpdPass = ''
         ArchivePass = ''; UnrarPath = 'TarginoRetroStation\Ferramentas\UnRar\UnRAR.exe'; TdlPath = 'TarginoRetroStation\Ferramentas\Tdl\tdl.exe'; TelegramPath = 'TarginoRetroStation\Ferramentas\Telegram\Telegram.exe'; ArchiveDirs = ''; T_Archived = 'Compactado: será extraído ao jogar'
         DetailWidth = 400; DescFont = ''; FontFamily = ''; TextWeight = 'Médio'; TextContrast = 6; TextRender = 'ClearType'; DescSize = 10; DescTitleSize = 18; DescSubSize = 13; DescLinkColor = '#4DA3FF'
         DetailPad = 15; DetailBg = ''; TitleFont = ''; TitleSize = 18; TitleStyle = 'Normal'; TitleColor = ''; TitleLines = 2; TitleAlign = 'Esquerda'
@@ -268,7 +267,7 @@ $S = @{ Title = 'Launcher'; Accent = '#1E90FF'; Zoom = 2; Maximized = $false; Pa
         JoyActions = 9; JoySearchModifier = 9
         Fullscreen = $true
         # Menu de filtros ao lado da busca (ShowFilter = mostrar o menu)
-        SideItems = 'all,recent,fav,inst,notinst'; RecentDays = 30; ShowSideCount = $true
+        SideItems = 'all,recent,fav'; RecentDays = 30; ShowSideCount = $true
         T_Fav = 'Favoritar'; T_Faved = 'Favorito'; T_Link = 'Baixar Jogo'; T_Version = 'Versão'; T_Zoom = 'Ampliar/Reduzir'; T_Offline = 'Unidade desconectada'
         T_All = 'Todos os Jogos'; T_Recent = 'Últimas atualizações'; T_Favs = 'Favoritos'; T_Inst = 'Instalados'; T_NotInst = 'Não instalados'
         T_Empty = 'Nenhum jogo nesta lista'
@@ -1620,6 +1619,13 @@ function Launch($g) {
     if (-not $g) { return }
     if ($g -and (RunFind "$($g.Id)")) { return }      # extraindo (v2.48.0): duplo clique / Enter não fazem nada até terminar ou falhar
     if ($g -and $script:Play.ContainsKey("$($g.Id)")) { PlayStop $g; return }   # já está aberto: duplo clique/Enter encerra (v2.36.0)
+    if($script:HydraNavigationEnabled){
+        $hydraExe=ExePath $g
+        if(-not $hydraExe -or -not [IO.File]::Exists($hydraExe)){
+            [void][Windows.Forms.MessageBox]::Show($form,'Hydra nao encontrado. Instale o Hydra oficial na pasta raiz do launcher.','Hydra nao encontrado');return
+        }
+        GameStart $g;return
+    }
     $exe = ExePath $g
     Log 'INFO' "Iniciando jogo '$($g.Name)' ($(Short $exe))"
     if (RunFind "$($g.Id)") { Log 'AVISO' "Jogo '$($g.Name)' está sendo extraído"; return }
@@ -1754,6 +1760,7 @@ function TgUrls($txt) {
 }
 function TgSessionOk { $p = TgPaths; try { return ([IO.File]::Exists($p.Sess) -and (New-Object IO.FileInfo $p.Sess).Length -gt 100) } catch { $Error.Clear(); $false } }
 function GameLinkOpen($g) {
+    if($script:HydraNavigationEnabled){return} # RetroStation never downloads games.
     if (-not $g -or -not $g.Link) { return }
     $urls = @(TgUrls $g.Link); $p = TgPaths
     if ($urls.Count -or "$($g.Link)" -match '^tg://') {
@@ -2258,7 +2265,7 @@ $script:CoverWarned = New-Object 'System.Collections.Generic.HashSet[string]'   
 $script:CoverGen = 0
 $script:Ix = $null; $script:ViewIds = $null
 $script:Perf = @{ Paint = (New-Object 'System.Collections.Generic.Queue[double]'); Filtro = (New-Object 'System.Collections.Generic.Queue[double]'); ReadyMs = 0 }
-$AllKeys = @('all', 'recent', 'fav', 'inst', 'notinst')
+$AllKeys = @('all', 'recent', 'fav')
 
 # ---- Leitura segura das configurações de aparência: valor inválido nunca quebra, usa o padrão e avisa uma vez no log ----
 function CfgWarn($key) { if (-not $script:CfgWarned[$key]) { $script:CfgWarned[$key] = $true; Log 'AVISO' "Valor inválido em '$key' no layout (usando o padrão)" } }
@@ -4295,7 +4302,7 @@ function ApplyLayout {
     ApplyWindowMode $form
     $q.Visible = [bool]$S.ShowSearch; $q.BackColor = $c.Side; $q.ForeColor = $c.Text
     $btnFil.BackColor = $c.Bg; $btnFil.ForeColor = $c.Text; $btnFil.FlatAppearance.MouseOverBackColor = $c.Bg; $btnFil.FlatAppearance.MouseDownBackColor = $c.Bg; $btnFil.FlatAppearance.BorderColor = $c.Bg; $fm.BackColor = $c.Side; $fm.ForeColor = $c.Text; $addm.BackColor = $c.Side; $addm.ForeColor = $c.Text
-    $btnAdd.Visible = [bool]$script:Dev; $btnDev.Visible = [bool]$script:Dev
+    $btnAdd.Visible = $false; $btnDev.Visible = [bool]$script:Dev
     $top.Visible = [bool]($S.ShowSearch -or $S.ShowFilter -or $script:Dev)
     $bot.Visible = [bool]$S.ShowZoom; $right.Visible = [bool]$S.ShowPanel
     foreach ($cl in $lt, $lst, $lver) { $cl.Hint = (TextHint $c.TextRender); $cl.Contrast = [int]$c.TextContrast; $cl.Invalidate() }
@@ -4967,270 +4974,9 @@ function NameFromFolder($nfDir) {   # nome do jogo a partir do nome da pasta, ti
     if (-not $nfN) { $nfN = "$nfDir".Trim() }      # nunca deixa o nome vazio
     $nfN
 }
-function JaSorted($jaArr) { $jaL = [string[]]$jaArr; [Array]::Sort($jaL, [StringComparer]::OrdinalIgnoreCase); , $jaL }
-function JaFirstExe($jaDir) {   # primeiro .exe da pasta do jogo; se não houver, das subpastas, nível por nível ('' = nenhum)
-    $jaLevel = @($jaDir)
-    while ($jaLevel.Count -gt 0) {
-        $jaNext = New-Object System.Collections.ArrayList
-        foreach ($jaP in $jaLevel) {
-            try {
-                foreach ($jaF in (JaSorted ([IO.Directory]::GetFiles($jaP, '*.exe')))) { if ($jaF.EndsWith('.exe', 'OrdinalIgnoreCase')) { return $jaF } }
-                foreach ($jaS in (JaSorted ([IO.Directory]::GetDirectories($jaP)))) { if (([int][IO.File]::GetAttributes($jaS) -band 1024) -eq 0) { [void]$jaNext.Add($jaS) } }
-            } catch { LogEx 'AVISO' "Adicionar em massa: não foi possível ler '$(Short $jaP)' ($($_.Exception.Message))" $_ }
-        }
-        $jaLevel = @($jaNext.ToArray())
-    }
-    ''
-}
-function JaScan {   # só lê o disco; não altera nada
-    $jaJd = [IO.Path]::Combine($Root, 'Jogos')
-    $jaUsed = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
-    foreach ($jaG in $script:Games) {
-        $jaSub = JogosSub (ExePath $jaG); if ($jaSub) { [void]$jaUsed.Add($jaSub) }
-    }
-    $jaRows = New-Object System.Collections.ArrayList; $jaIn = 0; $jaNo = 0
-    foreach ($jaD in (JaSorted ([IO.Directory]::GetDirectories($jaJd)))) {
-        $jaName = [IO.Path]::GetFileName($jaD)
-        if ($jaName.StartsWith('.') -or $jaName.EndsWith('.anterior', 'OrdinalIgnoreCase')) { continue }   # temporária da extração / pasta incompleta guardada
-        if ($jaUsed.Contains($jaD)) { $jaIn++; continue }
-        $jaExe = JaFirstExe $jaD
-        if (-not $jaExe) { $jaNo++; continue }
-        [void]$jaRows.Add([pscustomobject]@{ Name = (NameFromFolder $jaName); Dir = $jaD; Exe = $jaExe })
-    }
-    [pscustomobject]@{ Rows = @($jaRows.ToArray()); InCat = $jaIn; NoExe = $jaNo }
-}
-function JaCountText($jaLv) { "Adicionar ($($jaLv.CheckedItems.Count))" }
-function BulkAdd {
-    if ($script:CatBroken) { [void][Windows.Forms.MessageBox]::Show('O catálogo não pôde ser lido ao abrir o launcher; nada será gravado até o problema ser resolvido.', 'Adicionar em massa', 'OK', 'Warning'); return }
-    $jaJd = [IO.Path]::Combine($Root, 'Jogos')
-    if (-not [IO.Directory]::Exists($jaJd)) { [void][IO.Directory]::CreateDirectory($jaJd); [void][Windows.Forms.MessageBox]::Show("Pasta 'Jogos' criada. Coloque os jogos nela (uma pasta por jogo) e tente de novo.", 'Adicionar em massa'); return }
-    $jaSw = [Diagnostics.Stopwatch]::StartNew()
-    try { [Windows.Forms.Cursor]::Current = [Windows.Forms.Cursors]::WaitCursor; $jaScan = JaScan }
-    catch { LogEx 'ERRO' "Adicionar em massa: falha ao ler a pasta Jogos: $($_.Exception.Message)" $_; [void][Windows.Forms.MessageBox]::Show("Não foi possível ler a pasta Jogos:`n$($_.Exception.Message)", 'Adicionar em massa'); return }
-    finally { [Windows.Forms.Cursor]::Current = [Windows.Forms.Cursors]::Default }
-    Log 'INFO' "Adicionar em massa: $($jaScan.Rows.Count) pasta(s) nova(s) com .exe, $($jaScan.InCat) já no catálogo, $($jaScan.NoExe) sem .exe ($($jaSw.ElapsedMilliseconds) ms)"
-    $jaInfo = "Já no catálogo: $($jaScan.InCat) pasta(s).  Sem .exe (ex.: só .rar): $($jaScan.NoExe) pasta(s)."
-    if ($jaScan.Rows.Count -eq 0) { [void][Windows.Forms.MessageBox]::Show("Nenhum jogo novo com .exe em Jogos\.`n`n$jaInfo", 'Adicionar em massa'); return }
+# ROMs are discovered exclusively by HydraLibrary.
 
-    $jaF = New-Object Windows.Forms.Form -Property @{ ShowIcon = $false; Text = 'Adicionar jogos em massa'; Size = '820,560'; StartPosition = 'CenterParent'; MinimizeBox = $false; MinimumSize = '600,360' }
-    $jaTop = Lbl ("$($jaScan.Rows.Count) jogo(s) novo(s) em Jogos\. O nome é o nome da pasta (sem os trechos da aba Geral do painel dev). Desmarque o que não quiser adicionar.`n$jaInfo") 10 10 780 36
-    $jaTop.Anchor = 'Top, Left, Right'
-    $jaLv = New-Object Windows.Forms.ListView -Property @{ View = 'Details'; CheckBoxes = $true; FullRowSelect = $true; HideSelection = $false; MultiSelect = $false; Anchor = 'Top, Bottom, Left, Right' }
-    $jaLv.SetBounds(10, 50, 785, 410)
-    [void]$jaLv.Columns.Add('Nome', 320); [void]$jaLv.Columns.Add('Executável', 440)
-    foreach ($jaR in $jaScan.Rows) {
-        $jaIt = New-Object Windows.Forms.ListViewItem("$($jaR.Name)")
-        [void]$jaIt.SubItems.Add((Short $jaR.Exe))
-        $jaIt.Checked = $true; $jaIt.Tag = $jaR; [void]$jaLv.Items.Add($jaIt)
-    }
-    $jaOk  = New-Object Windows.Forms.Button -Property @{ Text = (JaCountText $jaLv); DialogResult = 'OK'; Anchor = 'Bottom, Right' }
-    $jaCa  = New-Object Windows.Forms.Button -Property @{ Text = 'Cancelar'; DialogResult = 'Cancel'; Anchor = 'Bottom, Right' }
-    $jaAll = New-Object Windows.Forms.Button -Property @{ Text = 'Marcar todos'; Anchor = 'Bottom, Left'; Tag = @($jaLv, $true) }
-    $jaNone = New-Object Windows.Forms.Button -Property @{ Text = 'Desmarcar todos'; Anchor = 'Bottom, Left'; Tag = @($jaLv, $false) }
-    $jaExe = New-Object Windows.Forms.Button -Property @{ Text = 'Trocar executável...'; Anchor = 'Bottom, Left'; Tag = $jaLv }
-    $jaAll.SetBounds(10, 472, 110, 30); $jaNone.SetBounds(126, 472, 120, 30); $jaExe.SetBounds(252, 472, 150, 30)
-    $jaOk.SetBounds(585, 472, 110, 30); $jaCa.SetBounds(701, 472, 94, 30)
-    $jaLv.Tag = $jaOk
-    $jaLv.Add_ItemChecked({ param($snd, $ev) $snd.Tag.Text = JaCountText $snd; $snd.Tag.Enabled = ($snd.CheckedItems.Count -gt 0) })
-    foreach ($jaB in $jaAll, $jaNone) { $jaB.Add_Click({ param($snd, $ev) $jaV = $snd.Tag[0]; $jaV.BeginUpdate(); foreach ($jaI in $jaV.Items) { $jaI.Checked = [bool]$snd.Tag[1] }; $jaV.EndUpdate() }) }
-    $jaExe.Add_Click({
-        param($snd, $ev)
-        $jaV = $snd.Tag
-        if ($jaV.SelectedItems.Count -lt 1) { [void][Windows.Forms.MessageBox]::Show('Clique primeiro no jogo da lista.', 'Trocar executável'); return }
-        $jaI = $jaV.SelectedItems[0]; $jaR = $jaI.Tag
-        $jaD = New-Object Windows.Forms.OpenFileDialog -Property @{ InitialDirectory = $jaR.Dir; Filter = 'Executável|*.exe'; Title = "Executável de '$($jaR.Name)'" }
-        if ($jaD.ShowDialog() -eq 'OK') {
-            if ((JogosSub $jaD.FileName) -ine $jaR.Dir) { [void][Windows.Forms.MessageBox]::Show("Escolha um .exe de dentro da pasta:`n$(Short $jaR.Dir)", 'Trocar executável'); return }
-            $jaR.Exe = $jaD.FileName; $jaI.SubItems[1].Text = Short $jaD.FileName; $jaI.Checked = $true
-        }
-        $jaD.Dispose()
-    })
-    $jaF.Controls.AddRange(@($jaTop, $jaLv, $jaAll, $jaNone, $jaExe, $jaOk, $jaCa))
-    $jaF.CancelButton = $jaCa
-    $jaRes = $jaF.ShowDialog($form)
-    $jaSel = @(foreach ($jaI in $jaLv.CheckedItems) { $jaI.Tag })
-    $jaF.Dispose()
-    if ($jaRes -ne 'OK' -or $jaSel.Count -eq 0) { return }
-
-    [void](Backup $Db 'antes-adicionar-massa')
-    $jaDay = Get-Date -Format 'yyyy-MM-dd'
-    foreach ($jaR in $jaSel) {
-        # mesmos campos e mesma ordem do cadastro manual (Edit)
-        $script:Games += [pscustomobject]@{ Id = (NewId $jaR.Name); Name = $jaR.Name; Exe = (Short $jaR.Exe); Args = ''; Cover = ''; Shot = ''; Version = ''; Link = ''; Desc = ''; ImgName = ''; Archive = ''; Added = $jaDay }
-    }
-    Save
-    Log 'INFO' "Adicionar em massa: $($jaSel.Count) jogo(s) adicionado(s): $((@($jaSel | ForEach-Object { $_.Name }) | Select-Object -First 30) -join '; ')$(if ($jaSel.Count -gt 30) { '; ...' })"
-    CatRefresh; Populate
-    [void][Windows.Forms.MessageBox]::Show("$($jaSel.Count) jogo(s) adicionado(s).", 'Adicionar em massa')
-}
-
-# ---- Atualização automática (UpdateWinPort) ----
-#  Você mesmo cria o arquivo (.zip ou .rar) e sobe no endereço da aba Atualização (UpdUrl, ex.: GitHub). A cada abertura, com a
-#  janelinha de carregamento: pede só o cabeçalho do arquivo (HEAD) e compara a ETag com a guardada em Dados\atualizacao.json
-#  (sem ETag no servidor: data + tamanho). Igual, sem internet ou servidor fora = segue a abertura normal.
-#  Diferente = baixa (com progresso), extrai tudo POR CIMA dos arquivos do launcher (sem perguntar, sem backup), apaga o download,
-#  guarda a ETag e abre o launcher de novo para ele seguir normalmente.
-#  Onde extrai: se o arquivo tem a pasta TarginoRetroStation\ dentro, ele é extraído na pasta do launcher (a de cima: TarginoRetroStation\, Jogos\,
-#  o executável...); se não tem, é extraído DENTRO de TarginoRetroStation\ (ex.: Launcher.ps1, Dados\layout.json, Capas\...). Uma pasta
-#  única envolvendo tudo é ignorada. Nunca são substituídos (são só da pessoa/deste PC): Dados\usuario.json (favoritos), Dados\ultimo_filtro.txt,
-#  Dados\atualizacao.json (a ETag), Dados\cache_instalacao.json, Dados\cache_imagens.json (e os .bak deles),
-#  componentes_instalados.txt, Logs\ e Cache\. Todo o resto (Launcher.ps1, layout.json, catalogo.json, janelas.json, capas...)
-#  é substituído. Nada é gravado fora da pasta do launcher.
-#  Arquivo em uso (o executável aberto, uma fonte carregada) é tirado do caminho para Cache\Substituidos (apagada na próxima abertura).
-$UpdFile = [IO.Path]::Combine($DataDir, 'atualizacao.json')
-$UpdSkip = 'TarginoRetroStation\Dados\usuario.json', 'TarginoRetroStation\Dados\usuario.json.bak', 'TarginoRetroStation\Dados\ultimo_filtro.txt', 'TarginoRetroStation\Dados\ultimo_filtro.txt.bak', 'TarginoRetroStation\Dados\atualizacao.json', 'TarginoRetroStation\Dados\atualizacao.json.bak',
-    'TarginoRetroStation\Dados\cache_instalacao.json', 'TarginoRetroStation\Dados\cache_instalacao.json.bak', 'TarginoRetroStation\Dados\cache_imagens.json', 'TarginoRetroStation\Dados\cache_imagens.json.bak',
-    'TarginoRetroStation\componentes_instalados.txt', 'TarginoRetroStation\Logs\', 'TarginoRetroStation\Cache\'
-Add-Type -AssemblyName System.IO.Compression.FileSystem
-function UpdTls {
-    try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 }
-    catch { $Error.Clear() }
-}
-# Aceita só HTTPS e endereço com nome de servidor comum (sem usuário:senha, sem IP literal entre colchetes)
-function UpdOkUrl($url) {
-    $u2 = "$url".Trim(); if (-not $u2) { return $false }
-    try { $ur = [uri]$u2 } catch { $Error.Clear(); return $false }
-    ($ur.Scheme -eq 'https' -and $ur.Host -and -not $ur.UserInfo -and $ur.Host -notmatch '[\[\]]')
-}
-function UpdState { $o = ReadJson $UpdFile $false; "$($o.ETag)" }
-function UpdSaveState($upEtag) { [void](WriteJson $UpdFile ([ordered]@{ ETag = "$upEtag"; Data = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') }) 2) }
-# Espera uma tarefa (rede) sem travar a janelinha; $onTick roda a cada volta (progresso). $false = passou do tempo.
-function UpdWait($upTask, $upMs, $onTick) {
-    $upSw = [Diagnostics.Stopwatch]::StartNew()
-    while (-not $upTask.IsCompleted) {
-        if ($onTick) { & $onTick }
-        [Windows.Forms.Application]::DoEvents()
-        if ($upSw.ElapsedMilliseconds -gt $upMs) { return $false }
-        Start-Sleep -Milliseconds 50
-    }
-    $true
-}
-# Cabeçalho do arquivo no servidor: @{ Id; Bytes } ou $null (sem internet, não encontrado, não respondeu)
-function UpdHead($url) {
-    UpdTls
-    $uq = [Net.HttpWebRequest][Net.WebRequest]::Create($url)
-    $uq.Method = 'HEAD'; $uq.UserAgent = "TarginoRetroStation/$AppVer"; $uq.AllowAutoRedirect = $true; $uq.Timeout = 15000
-    $uq.CachePolicy = New-Object Net.Cache.RequestCachePolicy([Net.Cache.RequestCacheLevel]::NoCacheNoStore)
-    $ut = $uq.GetResponseAsync()
-    if (-not (UpdWait $ut 15000 $null)) { try { $uq.Abort() } catch { $Error.Clear() }; Log 'AVISO' 'Atualização: o servidor não respondeu em 15 s'; return $null }
-    if ($ut.IsFaulted -or $ut.IsCanceled) {
-        $why = 'sem resposta'; try { $why = $ut.Exception.GetBaseException().Message } catch { $Error.Clear() }
-        Log 'INFO' "Atualização: não foi possível consultar o servidor ($why)"; return $null
-    }
-    $urs = $ut.Result
-    try { $et = "$($urs.Headers['ETag'])".Trim(); $len = [long]$urs.ContentLength; $lm = "$($urs.Headers['Last-Modified'])".Trim() } finally { $urs.Close() }
-    if (-not $et) { $et = "$lm|$len" }
-    @{ Id = $et; Bytes = $len }
-}
-# Baixa o arquivo mostrando o andamento na janelinha. Erro = exceção.
-function UpdDownload($url, $upDst, $upBytes) {
-    UpdTls
-    $wc = New-Object Net.WebClient; $wc.Headers.Add('User-Agent', "TarginoRetroStation/$AppVer")
-    try {
-        $tk = $wc.DownloadFileTaskAsync($url, $upDst)
-        $upMb = [Math]::Max(0.1, $upBytes / 1MB)
-        $ok = UpdWait $tk 1800000 {
-            $upHave = 0; try { if ([IO.File]::Exists($upDst)) { $upHave = (New-Object IO.FileInfo $upDst).Length } } catch { $Error.Clear() }
-            if ($upBytes -gt 0) { SplashSet ("Baixando atualização... {0:N0}% ({1:N1} de {2:N1} MB)" -f (100.0 * $upHave / $upBytes), ($upHave / 1MB), $upMb) (0.05 + 0.6 * [Math]::Min(1.0, $upHave / [double]$upBytes)) $false }
-            else { SplashSet ("Baixando atualização... {0:N1} MB" -f ($upHave / 1MB)) 0.3 $false }
-        }
-        if (-not $ok) { $wc.CancelAsync(); throw 'o download passou de 30 minutos' }
-        if ($tk.IsFaulted -or $tk.IsCanceled) { $why = 'falha de rede'; try { $why = $tk.Exception.GetBaseException().Message } catch { $Error.Clear() }; throw "o download falhou ($why)" }
-    } finally { $wc.Dispose() }
-    $got = (New-Object IO.FileInfo $upDst).Length
-    if ($upBytes -gt 0 -and $got -ne $upBytes) { throw "o download chegou incompleto ($got de $upBytes bytes)" }
-}
-# Descompacta o arquivo baixado (.zip ou .rar, conferido pelo conteúdo, não pelo nome) numa pasta temporária
-function UpdUnpack($upArc, $upOut) {
-    $hdr = New-Object byte[] 4
-    $fs = [IO.File]::OpenRead($upArc); try { [void]$fs.Read($hdr, 0, 4) } finally { $fs.Dispose() }
-    [void][IO.Directory]::CreateDirectory($upOut)
-    if ($hdr[0] -eq 0x50 -and $hdr[1] -eq 0x4B) { [IO.Compression.ZipFile]::ExtractToDirectory($upArc, $upOut); return }
-    if ($hdr[0] -eq 0x52 -and $hdr[1] -eq 0x61 -and $hdr[2] -eq 0x72 -and $hdr[3] -eq 0x21) {      # "Rar!"
-        $ux = UnrarExe; if (-not [IO.File]::Exists($ux)) { throw "o arquivo é .rar e o UnRAR.exe não foi encontrado em $(Short $ux)" }
-        $pp = ProcRedirect $ux "x -y -o+ $(PassArg "$($S.UpdPass)") -idq -- `"$upArc`" `"$($upOut.TrimEnd('\') + '\')`""
-        $upK = 0.0
-        while (-not (ProcDone $pp)) { $upK += (1 - $upK) * 0.01; SplashSet 'Extraindo atualização...' (0.65 + 0.2 * $upK) $false $true; Start-Sleep -Milliseconds 100 }
-        $code = $pp.Proc.ExitCode; $pp.Proc.Dispose()
-        if ($code -gt 1) { throw $(if ($code -eq 11) { 'senha do .rar da atualização incorreta ou ausente (modo dev, aba Atualização)' } else { "o UnRAR terminou com erro (código $code)" }) }
-        return
-    }
-    throw 'o arquivo baixado não é .zip nem .rar'
-}
-# Copia o que foi extraído por cima da pasta do launcher. Devolve @(arquivos substituídos, falhas).
-function UpdReplace($upOut) {
-    $src = $upOut
-    # pasta única envolvendo uma cópia do launcher (ex.: "TarginoRetroStation\TarginoRetroStation\..."): entra nela
-    $subs = @([IO.Directory]::GetDirectories($src))
-    if (@([IO.Directory]::GetFiles($src)).Count -eq 0 -and $subs.Count -eq 1 -and [IO.Directory]::Exists([IO.Path]::Combine($subs[0], $ArqName))) { $src = $subs[0] }
-    $intoRoot = [IO.Directory]::Exists([IO.Path]::Combine($src, $ArqName))
-    $dstBase = $(if ($intoRoot) { $Root } else { $Arq })
-    $files = @([IO.Directory]::GetFiles($src, '*', [IO.SearchOption]::AllDirectories))
-    $aside = [IO.Path]::Combine((ArqDir 'Cache'), 'Substituidos')
-    $nOk = 0; $nBad = 0; $k = 0
-    foreach ($f in $files) {
-        $k++
-        SplashSet "Atualizando arquivos ($k de $($files.Count))..." (0.85 + 0.15 * $k / [Math]::Max(1, $files.Count)) $false $true
-        $rel = $f.Substring($src.Length).TrimStart('\', '/')
-        $dst = [IO.Path]::GetFullPath([IO.Path]::Combine($dstBase, $rel))
-        $relRoot = $dst.Substring([Math]::Min($dst.Length, $Root.Length)).TrimStart('\', '/')
-        if (-not (InRoot $dst)) { $nBad++; Log 'AVISO' "Atualização: arquivo fora da pasta do launcher recusado ($rel)"; continue }
-        if (@($UpdSkip | Where-Object { $relRoot -ieq $_ -or ($_.EndsWith('\') -and $relRoot.StartsWith($_, 'OrdinalIgnoreCase')) }).Count) { continue }
-        try {
-            [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($dst))
-            if ([IO.File]::Exists($dst)) {
-                try { [IO.File]::SetAttributes($dst, [IO.FileAttributes]::Normal); [IO.File]::Delete($dst) }
-                catch {      # em uso (ex.: o executável aberto agora): tira do caminho (renomear funciona mesmo em uso) e põe o novo no lugar
-                    $Error.Clear(); [void][IO.Directory]::CreateDirectory($aside)
-                    [IO.File]::Move($dst, [IO.Path]::Combine($aside, [Guid]::NewGuid().ToString('N') + '_' + [IO.Path]::GetFileName($dst)))
-                }
-            }
-            [IO.File]::Move($f, $dst); $nOk++
-        } catch { $nBad++; LogEx 'AVISO' "Atualização: não foi possível substituir $relRoot ($($_.Exception.Message))" $_ }
-    }
-    Log 'INFO' "Atualização: extraída em $(if ($intoRoot) { 'pasta do launcher' } else { $ArqName + '\' }); $nOk arquivo(s) substituído(s)$(if ($nBad) { ", $nBad falha(s)" })"
-    @($nOk, $nBad)
-}
-# Fluxo completo na abertura. $true = atualizou (reabrir o launcher).
-function UpdRun {
-    $url = "$($S.UpdUrl)".Trim(); if (-not $url) { return $false }
-    if (-not (UpdOkUrl $url)) { Log 'AVISO' "Atualização: endereço recusado (só https): $url"; return $false }
-    SplashSet 'Procurando atualização...' 0.02 $true $true
-    $hd = UpdHead $url; if (-not $hd) { return $false }
-    if ($hd.Id -ceq (UpdState)) { return $false }      # nada novo no servidor
-    $tmp = [IO.Path]::Combine((ArqDir 'Cache'), 'Atualizacao'); $arc = [IO.Path]::Combine($tmp, 'UpdateWinPort.baixado'); $out = [IO.Path]::Combine($tmp, 'extraido')
-    Log 'INFO' ("Atualização: arquivo novo no servidor ({0:N1} MB); baixando" -f ($hd.Bytes / 1MB))
-    try {
-        if ([IO.Directory]::Exists($tmp)) { [IO.Directory]::Delete($tmp, $true) }
-        [void][IO.Directory]::CreateDirectory($tmp)
-        UpdDownload $url $arc $hd.Bytes
-        SplashSet 'Extraindo atualização...' 0.65 $true $true
-        UpdUnpack $arc $out
-        $res = UpdReplace $out
-        if ($res[1]) { throw "$($res[1]) arquivo(s) não puderam ser substituídos (detalhes no log)" }
-        UpdSaveState $hd.Id
-        return $true
-    } catch {
-        $why = "$($_.Exception.Message)"
-        LogEx 'ERRO' "Atualização: não foi concluída ($why); será tentada de novo na próxima abertura" $_
-        SplashSet "Não foi possível atualizar agora: $why" 1.0 $true $true; Start-Sleep -Milliseconds 2500
-        return $false
-    } finally { try { if ([IO.Directory]::Exists($tmp)) { [IO.Directory]::Delete($tmp, $true) } } catch { $Error.Clear() } }      # o download é sempre apagado
-}
-# Depois de atualizar: abre o launcher de novo (pelo executável) e fecha este, para ele seguir normalmente já atualizado
-function UpdRestart {
-    SplashSet 'Atualização concluída. Abrindo o launcher...' 1.0 $true $true
-    $ex = LauncherExe
-    if ($ex) {
-        try { [void][Diagnostics.Process]::Start((New-Object Diagnostics.ProcessStartInfo -Property @{ FileName = $ex; WorkingDirectory = $Root; UseShellExecute = $true })) }
-        catch { LogEx 'ERRO' "Atualização: não foi possível reabrir o launcher: $($_.Exception.Message)" $_; $ex = '' }
-    }
-    if (-not $ex) { SplashClose; [void][Windows.Forms.MessageBox]::Show('A atualização foi aplicada. Abra o launcher de novo.', 'Atualização') }
-    Log 'INFO' 'Atualização: reabrindo o launcher'
-    SplashClose; $form.Close()
-}
-# Restos de uma atualização anterior (arquivos que estavam em uso e foram tirados do caminho)
-function UpdCleanup { $sd = [IO.Path]::Combine((ArqDir 'Cache'), 'Substituidos'); if ([IO.Directory]::Exists($sd)) { try { [IO.Directory]::Delete($sd, $true) } catch { $Error.Clear() } } }
+# Updates use only the signed RetroStation stable channel.
 # ---- Diagnóstico de desempenho (modo dev > Ações): números medidos agora, para comparar versões e tamanhos de catálogo ----
 function PerfAdd($kind, $ms) { $qq = $script:Perf[$kind]; $qq.Enqueue([double]$ms); while ($qq.Count -gt 300) { [void]$qq.Dequeue() } }
 function PerfStat($kind) {
@@ -5588,7 +5334,6 @@ $script:DevSchema = @(
     @{ Tab = 'Geral'; Key = 'ShowTitle'; Type = 'bool'; Label = '      Título do jogo' }
     @{ Tab = 'Geral'; Key = 'ShowFav'; Type = 'bool'; Label = '      Botão Favoritar (o item do botão direito aparece sempre)' }
     @{ Tab = 'Geral'; Key = 'ShowVersion'; Type = 'bool'; Label = '      Versão' }
-    @{ Tab = 'Geral'; Key = 'ShowLink'; Type = 'bool'; Label = 'Opção "Baixar Jogo" no menu do botão direito (jogos com link)' }
     @{ Tab = 'Geral'; Key = 'ShowDesc'; Type = 'bool'; Label = '      Descrição' }
     @{ Tab = 'Geral'; Key = 'ShowShot'; Type = 'bool'; Label = '      Captura de tela' }
     @{ Tab = 'Geral'; Key = 'Accent'; Type = 'hex'; Label = 'Cor de destaque (#RRGGBB)' }
@@ -5666,10 +5411,6 @@ $script:DevSchema = @(
     @{ Tab = 'Compactados'; Key = 'UnrarPath'; Type = 'text'; Label = 'UnRAR.exe (relativo à pasta do launcher)' }
     @{ Tab = 'Compactados'; Key = 'TdlPath'; Type = 'text'; Label = 'tdl.exe para baixar do Telegram (relativo à pasta do launcher)' }
     @{ Tab = 'Compactados'; Key = 'TelegramPath'; Type = 'text'; Label = 'Telegram portátil, usado para conectar a conta (relativo à pasta do launcher)' }
-    @{ Tab = 'Atualização'; Key = 'UpdUrl'; Type = 'text'; Label = 'Endereço do arquivo de atualização UpdateWinPort, .zip ou .rar (https://...; vazio = sem atualização automática)' }
-    @{ Tab = 'Atualização'; Key = 'UpdPass'; Type = 'text'; Label = 'Senha do arquivo de atualização (só .rar; vazio = sem senha)' }
-    @{ Tab = 'Compactados'; Key = 'ArchivePass'; Type = 'text'; Label = 'Senha dos arquivos .rar (vazio = sem senha)' }
-    @{ Tab = 'Compactados'; Key = 'ArchiveDirs'; Type = 'text'; Label = 'Pastas extras com .rar (separe com ;)' }
     @{ Tab = 'Detalhes'; Key = 'H_Painel'; Type = 'header'; Label = 'Painel' }
     @{ Tab = 'Detalhes'; Key = 'DetailWidth'; Type = 'int'; Min = 260; Max = 800; Label = 'Largura do painel de detalhes (px)' }
     @{ Tab = 'Detalhes'; Key = 'DetailPad'; Type = 'int'; Min = 0; Max = 60; Label = 'Margem interna do painel (px)' }
@@ -5875,8 +5616,6 @@ function DevPanel {
     }
     # aba Ações: cadastro e manutenção do catálogo
     $acts = @(
-        @('+ Adicionar jogo',         { if (Edit $null) { CatRefresh; Populate } }),
-        @('Adicionar jogos em massa...', { BulkAdd }),
         @('Reconstruir índice de imagens', { ImgRebuildReport }),
         @('Editar jogo selecionado',  { $g = Sel; if ($g -and (Edit $g)) { CatRefresh; Populate } }),
         @('Remover jogo selecionado', { RemoveGame (Sel) }),
@@ -5923,6 +5662,15 @@ function AddCtx($text, $action) { [void]$cm.Items.Add("$text", $null, $action) }
 $cm.Add_Opening({
     param($snd, $e)
     $g = $script:CtxGame; if (-not $g) { $e.Cancel = $true; return }
+    if($script:HydraNavigationEnabled){
+        foreach($old in @($cm.Items)){$old.Dispose()};$cm.Items.Clear()
+        AddCtx $(if($script:Play.ContainsKey("$($g.Id)")){'Fechar jogo'}else{'Jogar'}) {Launch $script:CtxGame}
+        if($g.HydraKind -ne 'system'){
+            AddCtx $(if($U.Fav -contains $g.Id){$S.T_CtxUnfav}else{$S.T_CtxFav}) {ToggleFav $script:CtxGame;Populate;ShowGame (Sel)}
+        }
+        AddCtx 'Personalizar launcher...' {ShowTarginoPreferences}
+        return
+    }
     $ctxRun = RunFind "$($g.Id)"
     if ($ctxRun -and $ctxRun.Stage -ne 'dl') { $e.Cancel = $true; return }      # extraindo (v2.48.0): sem menu até terminar ou falhar
     foreach ($old in @($cm.Items)) { $old.Dispose() }; $cm.Items.Clear()
@@ -6135,7 +5883,6 @@ $btnFav.Add_Click({ $g = Sel; if ($g) { ToggleFav $g; Populate; ShowGame (Sel) }
 $btnAdd.Add_Click({
     foreach ($old in @($addm.Items)) { $old.Dispose() }; $addm.Items.Clear()
     [void]$addm.Items.Add('Adicionar um jogo...', $null, { if (Edit $null) { CatRefresh; Populate } })
-    [void]$addm.Items.Add('Adicionar em massa (pasta Jogos)...', $null, { BulkAdd })
     $addm.Show($btnAdd, 0, $btnAdd.Height)
 })
 $btnDev.Add_Click({ DevPanel })
@@ -6194,131 +5941,7 @@ $form.Add_Activated({
 # Personalizacao publica: Ctrl + Shift + F12. O modo dev exige Shift+F10 por 5 segundos.
 $form.Add_HandleCreated({ ThemeTitle })
 $form.Add_KeyDown({ if ($_.Control -and $_.Shift -and $_.KeyCode -eq 'F12') { $_.Handled=$true; $_.SuppressKeyPress=$true; ShowTarginoPreferences } })
-# ---- Componentes que alguns jogos precisam (Visual C++, .NET Desktop Runtime, OpenAL, DirectX): instalados uma vez por computador ----
-#  Na abertura, se TarginoRetroStation\componentes_instalados.txt não tem uma linha deste computador, os instaladores de
-#  TarginoRetroStation\Ferramentas\Dependencias são rodados em silêncio, com o progresso na janelinha de carregamento (sem janela preta).
-#  O Windows pede permissão de administrador UMA vez (todos os instaladores rodam num único processo auxiliar elevado e oculto).
-#  O arquivo de checagem tem uma linha por computador (nome|data|resumo), porque o launcher é portátil: o mesmo HD/pasta usado em
-#  outro PC instala de novo lá. Ele só é gravado quando o auxiliar chega ao fim; permissão recusada = tenta de novo na próxima abertura.
-#  Sem a pasta Dependencias, nada acontece. Para reinstalar neste PC: apague a linha dele (ou o arquivo inteiro).
-$DepsDir = [IO.Path]::Combine((ArqDir 'Ferramentas'), 'Dependencias')
-$DepsFile = [IO.Path]::Combine($Arq, 'componentes_instalados.txt')
-$DepsArgs2005 = '/q:a /c:"msiexec /i vcredist.msi /qn"'
-$DepsList = @(      # nome mostrado | arquivo (relativo a Dependencias) | argumentos silenciosos | só em Windows 64 bits
-    ,@('Visual C++ 2005 x86', 'vcredist2005_x86.exe', $DepsArgs2005, $false)
-    ,@('Visual C++ 2005 x64', 'vcredist2005_x64.exe', $DepsArgs2005, $true)
-    ,@('Visual C++ 2005 x86 (alt)', 'vcredist2005_altx86.exe', $DepsArgs2005, $false)
-    ,@('Visual C++ 2005 x64 (alt)', 'vcredist2005_altx64.exe', $DepsArgs2005, $true)
-    ,@('Visual C++ 2008 x86', 'vcredist2008_x86.exe', '/q', $false)
-    ,@('Visual C++ 2008 x64', 'vcredist2008_x64.exe', '/q', $true)
-    ,@('Visual C++ 2010 x86', 'vcredist2010_x86.exe', '/q /norestart', $false)
-    ,@('Visual C++ 2010 x64', 'vcredist2010_x64.exe', '/q /norestart', $true)
-    ,@('Visual C++ 2012 x86', 'vcredist2012_x86.exe', '/install /quiet /norestart', $false)
-    ,@('Visual C++ 2012 x64', 'vcredist2012_x64.exe', '/install /quiet /norestart', $true)
-    ,@('Visual C++ 2013 x86', 'vcredist2013_x86.exe', '/install /quiet /norestart', $false)
-    ,@('Visual C++ 2013 x64', 'vcredist2013_x64.exe', '/install /quiet /norestart', $true)
-    ,@('Visual C++ 2015-2022 x64', 'VC_redist2015-22x64.exe', '/install /quiet /norestart', $true)
-    ,@('Visual C++ 2015-2022 x86', 'VC_redist2015-22x86.exe', '/install /quiet /norestart', $false)
-    ,@('.NET Desktop Runtime 7', 'windowsdesktop-runtime-7.0.20-win-x64.exe', '/install /quiet /norestart', $true)
-    ,@('.NET Desktop Runtime 10', 'windowsdesktop-runtime-10.0.11-win-x64.exe', '/install /quiet /norestart', $true)
-    ,@('OpenAL', 'oalinst.exe', '/s', $false)
-    ,@('DirectX', 'DirectX\DXSETUP.exe', '/silent', $false)
-)
-# Códigos de saída que contam como "instalado" (0 = ok, 3010/1641 = pede reiniciar, 1638/5100 = versão igual ou mais nova já instalada)
-$DepsOkCodes = '0', '3010', '1641', '1638', '5100'
-# Processo auxiliar (roda elevado e oculto): lê a lista, roda cada instalador sem janela e escreve o andamento num arquivo
-$DepsHelper = @'
-param([string]$Lista, [string]$Prog)
-$ErrorActionPreference = 'Continue'
-function Linha($t) { try { [IO.File]::AppendAllText($Prog, $t + "`r`n", (New-Object Text.UTF8Encoding $false)) } catch {} }
-$itens = @([IO.File]::ReadAllLines($Lista, [Text.Encoding]::UTF8) | Where-Object { $_ })
-$n = $itens.Count; $i = 0; $w64 = [Environment]::Is64BitOperatingSystem
-foreach ($l in $itens) {
-    $i++; $c = $l.Split("`t")
-    Linha "I|$i|$n|$($c[0])"
-    if ($c[3] -eq '1' -and -not $w64) { Linha "R|$i|pulado (Windows 32 bits)"; continue }
-    if (-not [IO.File]::Exists($c[1])) { Linha "R|$i|ausente"; continue }
-    try {
-        $psi = New-Object Diagnostics.ProcessStartInfo $c[1]
-        $psi.Arguments = $c[2]; $psi.UseShellExecute = $false; $psi.CreateNoWindow = $true; $psi.WorkingDirectory = [IO.Path]::GetDirectoryName($c[1])
-        $p = [Diagnostics.Process]::Start($psi); $p.WaitForExit(); Linha "R|$i|$($p.ExitCode)"; $p.Dispose()
-    } catch { Linha "R|$i|erro: $($_.Exception.Message)" }
-}
-Linha 'PRONTO'
-'@
-function DepsNeeded {
-    if (-not [IO.Directory]::Exists($DepsDir)) { return $false }
-    if (-not [IO.File]::Exists($DepsFile)) { return $true }
-    try { foreach ($dpL in [IO.File]::ReadAllLines($DepsFile)) { if ($dpL.StartsWith("$env:COMPUTERNAME|", 'OrdinalIgnoreCase')) { return $false } } }
-    catch { LogEx 'AVISO' "Não foi possível ler $(Short $DepsFile): $($_.Exception.Message)" $_ }
-    $true
-}
-function DepsReadProg($dpFile) {   # linhas do arquivo de andamento (o auxiliar pode estar escrevendo nele ao mesmo tempo)
-    if (-not [IO.File]::Exists($dpFile)) { return @() }
-    try {
-        $dpFs = New-Object IO.FileStream($dpFile, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
-        try { $dpRd = New-Object IO.StreamReader($dpFs, [Text.Encoding]::UTF8); @($dpRd.ReadToEnd() -split "`r?`n" | Where-Object { $_ }) } finally { $dpFs.Dispose() }
-    } catch { $Error.Clear(); @() }
-}
-function DepsInstall {
-    $dpSw = [Diagnostics.Stopwatch]::StartNew()
-    $dpTmp = [IO.Path]::Combine((ArqDir 'Cache'), 'Componentes')
-    $dpHelp = [IO.Path]::Combine($dpTmp, 'Instalar.ps1'); $dpList = [IO.Path]::Combine($dpTmp, 'lista.txt'); $dpProg = [IO.Path]::Combine($dpTmp, 'andamento.txt')
-    $dpItems = @(foreach ($dpD in $DepsList) { "$($dpD[0])`t$([IO.Path]::Combine($DepsDir, $dpD[1]))`t$($dpD[2])`t$(if ($dpD[3]) { '1' } else { '0' })" })
-    try {
-        [void][IO.Directory]::CreateDirectory($dpTmp)
-        if ([IO.File]::Exists($dpProg)) { [IO.File]::Delete($dpProg) }
-        [IO.File]::WriteAllText($dpHelp, $DepsHelper, $Utf8Bom)
-        [IO.File]::WriteAllLines($dpList, [string[]]$dpItems, $Utf8Bom)
-    } catch { LogEx 'ERRO' "Componentes: não foi possível preparar a instalação: $($_.Exception.Message)" $_; return }
-    Log 'INFO' "Componentes: instalando $($dpItems.Count) item(ns) neste computador ($env:COMPUTERNAME)"
-    SplashSet 'Instalando componentes para os jogos (confirme a permissão do Windows)...' 0.0 $true $true
-    $dpPsi = New-Object Diagnostics.ProcessStartInfo "$([Environment]::SystemDirectory)\WindowsPowerShell\v1.0\powershell.exe"
-    $dpPsi.Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$dpHelp`" -Lista `"$dpList`" -Prog `"$dpProg`""
-    $dpPsi.UseShellExecute = $true; $dpPsi.Verb = 'runas'; $dpPsi.WindowStyle = 'Hidden'; $dpPsi.WorkingDirectory = $dpTmp
-    $dpPr = $null
-    try { $dpPr = [Diagnostics.Process]::Start($dpPsi) }
-    catch {
-        LogEx 'AVISO' "Componentes: instalação não iniciada (permissão recusada ou erro: $($_.Exception.Message)); será oferecida de novo na próxima abertura" $_
-        SplashSet 'Instalação dos componentes cancelada; ela será oferecida de novo na próxima abertura.' 0.0 $true $true
-        Start-Sleep -Milliseconds 1800
-        try { [IO.Directory]::Delete($dpTmp, $true) } catch { $Error.Clear() }
-        return
-    }
-    $dpTot = $dpItems.Count; $dpLast = ''
-    while ($true) {
-        $dpDone = $dpPr.HasExited
-        $dpLines = DepsReadProg $dpProg
-        $dpCur = @($dpLines | Where-Object { $_.StartsWith('I|') }) | Select-Object -Last 1
-        if ($dpCur -and $dpCur -ne $dpLast) {
-            $dpLast = $dpCur; $dpP = $dpCur.Split('|', 4)
-            SplashSet "Instalando componentes ($($dpP[1]) de $dpTot): $($dpP[3])..." (([int]$dpP[1] - 1) / [double][Math]::Max(1, $dpTot)) $true $true
-        } else { [Windows.Forms.Application]::DoEvents() }      # mantém a janelinha respondendo
-        if ($dpDone) { break }
-        Start-Sleep -Milliseconds 100
-    }
-    $dpPr.Dispose()
-    # resultado de cada instalador vai para o log
-    $dpLines = DepsReadProg $dpProg; $dpNames = @{}; $dpOk = 0; $dpBad = @(); $dpMiss = 0
-    foreach ($dpL in $dpLines) {
-        $dpP = $dpL.Split('|', 4)
-        if ($dpP[0] -eq 'I') { $dpNames[$dpP[1]] = $dpP[3] }
-        elseif ($dpP[0] -eq 'R') {
-            $dpNm = $dpNames[$dpP[1]]; $dpRes = "$($dpP[2])"
-            if ($DepsOkCodes -contains $dpRes) { $dpOk++; Log 'INFO' "Componentes: $dpNm instalado (código $dpRes)" }
-            elseif ($dpRes -eq 'ausente' -or $dpRes.StartsWith('pulado')) { $dpMiss++; Log 'INFO' "Componentes: $dpNm $(if ($dpRes -eq 'ausente') { 'não está na pasta Dependencias (pulado)' } else { $dpRes })" }
-            else { $dpBad += $dpNm; Log 'AVISO' "Componentes: $dpNm terminou com $(if ($dpRes -match '^-?\d+$') { "código $dpRes" } else { $dpRes })" }
-        }
-    }
-    $dpEnd = ($dpLines -contains 'PRONTO')
-    try { [IO.Directory]::Delete($dpTmp, $true) } catch { $Error.Clear() }
-    if (-not $dpEnd) { Log 'AVISO' "Componentes: a instalação não chegou ao fim ($([int]$dpSw.Elapsed.TotalSeconds) s); será feita de novo na próxima abertura"; return }
-    $dpSum = "$dpOk ok, $($dpBad.Count) com aviso, $dpMiss pulado(s)"
-    try { [IO.File]::AppendAllText($DepsFile, "$env:COMPUTERNAME|$(Get-Date -Format 'yyyy-MM-dd HH:mm')|$dpSum`r`n", (New-Object Text.UTF8Encoding $false)) }
-    catch { LogEx 'ERRO' "Componentes: não foi possível gravar $(Short $DepsFile): $($_.Exception.Message)" $_ }
-    Log 'INFO' "Componentes: concluído em $([int]$dpSw.Elapsed.TotalSeconds) s ($dpSum)$(if ($dpBad.Count) { '; com aviso: ' + ($dpBad -join ', ') })"
-    SplashSet 'Componentes instalados.' 1.0 $true $true
-}
+# Launcher dependencies are validated by the installer; no game runtimes are installed.
 # ---- Tela de carregamento (v2.29.0): a janela principal fica invisível até as capas estarem prontas ----
 function SplashOpen {
     try {
@@ -6638,14 +6261,8 @@ $form.Add_FormClosed({
 })
 $form.Add_Shown({
     TopCenter
-    $lsOn = [bool]$S.LoadScreen; $spOn = ($lsOn -or $script:DepsNeed -or $script:UpdOn)
+    $lsOn = [bool]$S.LoadScreen; $spOn = $lsOn
     if ($spOn) { SplashOpen }
-    if ($script:UpdOn) {      # atualização automática (UpdateWinPort): aplicou = reabre o launcher já atualizado
-        $updDone = $false
-        try { $updDone = UpdRun } catch { LogEx 'ERRO' "Atualização: falha inesperada: $($_.Exception.Message)" $_ }
-        if ($updDone) { UpdRestart; return }      # abre o launcher de novo, já atualizado
-    }
-    if ($script:DepsNeed) { try { DepsInstall } catch { LogEx 'ERRO' "Componentes: falha na instalação: $($_.Exception.Message)" $_ } }      # 1ª abertura neste PC
     if ($spOn) { SplashSet 'Lendo o catálogo...' 0.02 $true }
     try {
         InitFilter; CatRefresh; ApplyLayout; Populate
@@ -6675,11 +6292,9 @@ if([IO.File]::Exists((Join-Path $Arq 'TarginoBigPicture.ps1'))){
 }
 $errTm = New-Object Windows.Forms.Timer -Property @{ Interval = 3000 }
 $errTm.Add_Tick({ FlushErrors }); $errTm.Start()
-$S.UpdUrl='';$S.UpdPass='' # The legacy arbitrary-URL updater is never used by RetroStation.
-$script:DepsNeed = DepsNeeded; $script:UpdOn = $false; UpdCleanup
 $welcomeModule=Join-Path $Arq 'TarginoWelcome.ps1'
 if([IO.File]::Exists($welcomeModule)){. $welcomeModule;InitializeTarginoWelcome}
-if ([bool]$S.LoadScreen -or $script:DepsNeed -or $script:UpdOn) { $form.Opacity = 0 }      # invisível até a tela de carregamento terminar (Shown)
+if ([bool]$S.LoadScreen) { $form.Opacity = 0 }
 . (Join-Path $Arq 'RetroStationUpdateUI.ps1')
 Initialize-RetroStationUpdates
 [void]$form.ShowDialog()

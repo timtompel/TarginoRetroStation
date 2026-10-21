@@ -2,7 +2,7 @@
 $project=Split-Path $PSScriptRoot
 $fixture=Join-Path $project ('build\test-'+[guid]::NewGuid().ToString('N'))
 [void][IO.Directory]::CreateDirectory($fixture)
-$setup=Join-Path $project 'dist\TarginoRetroStation-1.5.1-Setup.exe'
+$setup=Join-Path $project 'dist\TarginoRetroStation-1.5.2-Setup.exe'
 [IO.File]::WriteAllBytes((Join-Path $fixture 'hydra.exe'),[byte[]]@(77,90,0,0))
 foreach($dir in @('roms','bios','Saves')){[void][IO.Directory]::CreateDirectory((Join-Path $fixture $dir));[IO.File]::WriteAllText((Join-Path $fixture ($dir+'\preservar.txt')),'fixture-nao-e-jogo')}
 $before=@{};Get-ChildItem -LiteralPath $fixture -File -Recurse|ForEach-Object {$before[$_.FullName]=(Get-FileHash -LiteralPath $_.FullName).Hash}
@@ -13,6 +13,13 @@ foreach($name in @('Launcher.ps1','RetroStationUpdateUI.ps1','RetroStationUpdate
 $user=Join-Path $addon 'Dados\usuario.json';[IO.File]::WriteAllText($user,'{"Fav":["fixture"]}')
 Install-Fixture '--extract-only'
 if([IO.File]::ReadAllText($user) -cne '{"Fav":["fixture"]}'){throw 'Favoritos sobrescritos'}
+if(@(Get-ChildItem -LiteralPath (Join-Path $addon 'Backups\Instalador') -Recurse -File -ErrorAction SilentlyContinue).Count){throw 'Reinstalacao identica criou backup desnecessario'}
+$installedSource=Join-Path $addon 'Launcher.ps1';$originalHash=(Get-FileHash -LiteralPath $installedSource).Hash
+[IO.File]::AppendAllText($installedSource,"`r`n# OLD-VERSION-FIXTURE`r`n")
+Install-Fixture '--extract-only'
+if((Get-FileHash -LiteralPath $installedSource).Hash -ne $originalHash){throw 'Arquivo antigo nao foi substituido'}
+$backups=@(Get-ChildItem -LiteralPath (Join-Path $addon 'Backups\Instalador') -Recurse -File)
+if($backups.Count -ne 1 -or [IO.File]::ReadAllText($backups[0].FullName) -notmatch 'OLD-VERSION-FIXTURE'){throw 'Backup da versao anterior ausente ou duplicado'}
 foreach($file in $before.Keys){if((Get-FileHash -LiteralPath $file).Hash -ne $before[$file]){throw ('Arquivo externo modificado '+$file)}}
 Write-Output 'CLEAN_INSTALL_REINSTALL_BACKUP_USER_STATE_AND_EXTERNAL_FILES_OK'
 # Isolated migration test using installer private entry, no shortcuts/registry.
@@ -28,7 +35,7 @@ if((Test-Path -LiteralPath $old) -or -not(Test-Path (Join-Path $addon 'Midia\fun
 if(-not(Get-ChildItem -LiteralPath (Join-Path $addon 'Backups\Migracao-1.4.2') -Recurse -Filter '*.zip')){throw 'Backup das diferencas ausente'}
 Write-Output 'TWO_FOLDERS_CONSOLIDATED_WITHOUT_DUPLICATING_MEDIA_AND_DIFFERENCES_BACKED_UP_OK'
 Add-Type -AssemblyName System.IO.Compression.FileSystem
-$z=[IO.Compression.ZipFile]::OpenRead((Join-Path $project 'dist\TarginoRetroStation-1.5.1-Arquivos.zip'))
+$z=[IO.Compression.ZipFile]::OpenRead((Join-Path $project 'dist\TarginoRetroStation-1.5.2-Arquivos.zip'))
 try{foreach($e in $z.Entries){if($e.FullName -match '(?i)(^|/)(bios|roms|Saves|cores|Cache|Logs|hydra\.exe|usuario\.json|fontes-dados\.json|layout\.json)(/|$)'){throw ('Conteudo proibido '+$e.FullName)}}}finally{$z.Dispose()}
 Write-Output 'NO_HYDRA_ROMS_BIOS_SAVES_OR_PERSONAL_DATA_IN_PAYLOAD_OK'
 # Parse and initialize actual WinForms launcher without starting UI/network/game processes.
@@ -40,12 +47,14 @@ $source=$source.Replace('InitializeTarginoWelcome',"Write-Verbose 'welcome disab
 $source=$source.Replace('[void]$form.ShowDialog()',@'
 if($S.Title -ne 'Targino RetroStation' -or $S.HeaderText -ne 'Targino RetroStation'){throw 'Nome incorreto'}
 if($script:TaskId -notlike 'TarginoRetroStation.Launcher.*'){throw 'AppID incorreto'}
-if($script:UpdOn){throw 'Atualizador legado habilitado'}
+if(Get-Command UpdRun -ErrorAction SilentlyContinue){throw 'Atualizador legado ainda presente'}
 if($S.PassHash){throw 'Instalacao limpa contem credencial de desenvolvedor'}
 if(Unlock){throw 'Area privilegiada sem senha local'}
 if(-not (Get-Command Start-RetroStationUpdate -ErrorAction SilentlyContinue)){throw 'Menu update nao conectado'}
 if(-not $script:TaskIcon){throw 'Icone ausente'}
 InitFilter;CatRefresh;ApplyLayout;Populate
+$S.SideItems='all,recent,fav,inst,notinst';$script:Filter='notinst';EnsureFilter
+if($script:Filter -ne 'all' -or @((FilterKeys)|Where-Object {$_ -in @('inst','notinst')}).Count){throw 'Filtros legados nao migrados'}
 $form.Show();[Windows.Forms.Application]::DoEvents()
 $mouseEnter=[Windows.Forms.Control].GetMethod('OnMouseEnter',[Reflection.BindingFlags]'Instance,NonPublic')
 for($cycle=0;$cycle -lt 5;$cycle++){

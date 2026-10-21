@@ -16,6 +16,8 @@ try{
     $path=Sign-Payload $payload;[void](Read-FrontendSignedManifest $path $key)
     $e=[IO.File]::ReadAllText($path)|ConvertFrom-Json;$bytes=[Convert]::FromBase64String($e.payload);$bytes[0]=$bytes[0] -bxor 1;$e.payload=[Convert]::ToBase64String($bytes);[IO.File]::WriteAllText($path,($e|ConvertTo-Json));Must-Fail {Read-FrontendSignedManifest $path $key}
     $payload.product='TarginoLauncher.Recompilados';$path=Sign-Payload $payload;Must-Fail {Read-FrontendSignedManifest $path $key}
+    $payload.product='TarginoRetroStation.Hydra';$payload.size=65MB;$path=Sign-Payload $payload;[void](Read-FrontendSignedManifest $path $key)
+    $payload.size=513MB;$path=Sign-Payload $payload;Must-Fail {Read-FrontendSignedManifest $path $key}
     Must-Fail {Assert-FrontendPackage (Join-Path $project 'README.md') @{size=1;sha256=('a'*64)}}
 }finally{$rsa.Dispose()}
 Write-Output 'STABLE_ONLY_NO_DOWNGRADE_WRONG_REPO_WRONG_PRODUCT_TAMPERED_SIGNATURE_AND_HASH_REJECTED_OK'

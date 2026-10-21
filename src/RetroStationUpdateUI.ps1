@@ -12,8 +12,11 @@ function Start-RetroStationUpdate([switch]$Automatic){
     if($Automatic){$psi.Arguments+=' -Automatic'}
     $psi.UseShellExecute=$false;$psi.CreateNoWindow=$true;$psi.WorkingDirectory=$Root
     $script:RetroUpdateProcess=[Diagnostics.Process]::Start($psi)
+    [void](WriteJson (Join-Path $script:RetroUpdateJob 'active.json') @{WorkerPid=$script:RetroUpdateProcess.Id} 2)
 }
 function Initialize-RetroStationUpdates {
+    . (Join-Path $Arq 'UpdateCache.ps1')
+    Clear-RetroStationUpdateCache (Join-Path $Arq 'Cache\Update')
     $script:RetroUpdateTimer=New-Object Windows.Forms.Timer -Property @{Interval=1200}
     $script:RetroUpdateTimer.Add_Tick({
         if(-not $script:RetroUpdateJob){return}

@@ -25,7 +25,7 @@ try{
     }
     if((Show-RetroStationUpdateChoice $m) -ne 'Yes'){exit 0}
     $setup=Join-Path $Job $m.fileName
-    Receive-FrontendFile $m.url $setup 64MB $null ''
+    Receive-FrontendFile $m.url $setup 512MB $null ''
     Assert-FrontendPackage $setup $m
     $psi=New-Object Diagnostics.ProcessStartInfo
     $psi.FileName=$setup;$psi.Arguments='--apply-update "'+$Root+'" '+$LauncherPid
@@ -36,4 +36,6 @@ try{
     [IO.File]::WriteAllText((Join-Path $Job 'error.txt'),$_.Exception.Message)
     if(-not $Automatic){[void][Windows.Forms.MessageBox]::Show('Nao foi possivel verificar/baixar a atualizacao. Nada foi instalado.'+"`r`n"+$_.Exception.Message,'Targino RetroStation','OK','Warning')}
     exit 1
+}finally{
+    [IO.File]::WriteAllText((Join-Path $Job 'completed'),[datetime]::UtcNow.ToString('o'))
 }

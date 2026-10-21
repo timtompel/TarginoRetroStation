@@ -2,9 +2,11 @@
 
 ![Targino Social Media](assets/banner.png)
 
-Frontend independente para **Hydra Frontend**, com biblioteca por sistemas, capas, busca, favoritos, controle, música e modo Big Picture. Não é o Hydra Launcher comercial. Versão 1.5.1: evolução do complemento TarginoLauncher 1.4.2 para Hydra; não confundir com o projeto de recompilados do Central Arquivista.
+Frontend independente para **Hydra Frontend**, com biblioteca por sistemas, capas, busca, favoritos, controle, música e modo Big Picture. Não é o Hydra Launcher comercial. Versão 1.5.2: evolução do complemento TarginoLauncher 1.4.2 para Hydra; não confundir com o projeto de recompilados do Central Arquivista.
 
 ## Instalar
+
+Na 1.5.2, escolha **WebSetup.exe** (instalador pequeno que baixa e verifica a última versão estável) ou **Setup.exe** (pacote completo para instalação offline). No instalador web, Baixar instalador → aguardar validação → Instalar. Não há download de jogos/BIOS/Hydra nem atualização diferencial. Notas da limpeza e testes: [1.5.2](docs/NOTAS-1.5.2.md).
 
 1. Instale e prepare o [Hydra oficial](https://hydrafrontend.com/) em uma pasta gravável.
 2. Baixe o instalador em [Releases](https://github.com/timtompel/TarginoRetroStation/releases/latest).
@@ -29,7 +31,7 @@ Na primeira atualização, mantenha marcada a opção de reaproveitar e consolid
 
 ## Compilar / publicar
 
-Windows x64, Windows PowerShell 5.1 e compilador C# do .NET Framework 4.x. Execute `powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File installer/Build.ps1`. Recursos de marca já estão incluídos; não é preciso Python para compilar. A versão inicial é 1.5.1. A chave pública vem em `src/UpdatePublicKey.xml`; a privada do publicador é protegida por DPAPI e nunca faz parte deste projeto ou das releases. Não substitua a chave pública em futuras versões.
+Windows x64, Windows PowerShell 5.1 e compilador C# do .NET Framework 4.x. Execute `powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File installer/Build.ps1`. Recursos de marca já estão incluídos; não é preciso Python para compilar. A versão atual é 1.5.2. A chave pública vem em `src/UpdatePublicKey.xml`; a privada do publicador é protegida por DPAPI e nunca faz parte deste projeto ou das releases. Não substitua a chave pública em futuras versões.
 
 Os testes usam instalações sintéticas, sem ROMs ou BIOS reais. A aprovação desses testes não comprova compatibilidade de todos os jogos, placas ou cores. Não foram corrigidas as limitações conhecidas do modo Software do PS2 neste computador.
 

@@ -9,7 +9,7 @@ foreach($folder in @($store,$sources,$snaps)){[void][IO.Directory]::CreateDirect
 $cache=Join-Path $store ($request.Key+'.json')
 $mutex=New-Object Threading.Mutex($false,('Local\TarginoDetails-'+$request.Key+'-'+([Math]::Abs($addon.GetHashCode()))))
 if(-not $mutex.WaitOne(0)){$mutex.Dispose();exit}
-$script:transport=$null;$script:pythonOnly=$false;$script:downloads=0
+$script:downloads=0
 function Save-Details($object){
     $temporary=$cache+'.'+[Guid]::NewGuid().ToString('N')+'.tmp'
     [IO.File]::WriteAllText($temporary,(ConvertTo-Json $object -Depth 6),(New-Object Text.UTF8Encoding($false)))
@@ -18,27 +18,8 @@ function Save-Details($object){
 }
 function Fetch-Details([string]$url,[string]$path){
     if([IO.File]::Exists($path)){return}
-    $tmp=$path+'.download'
-    if(-not $script:pythonOnly){
-        $web=if(Get-Command NewHydraMetadataWebClient -ErrorAction SilentlyContinue){NewHydraMetadataWebClient}else{New-Object Net.WebClient}
-        $web.Headers['User-Agent']='TarginoRetroStation/1.3 (+libretro metadata)'
-        try{$web.DownloadFile($url,$tmp);[IO.File]::Move($tmp,$path);$script:downloads++;return}
-        catch{if($_.Exception.InnerException -and $_.Exception.InnerException.Response){throw};$script:pythonOnly=$true}
-        finally{$web.Dispose()}
-    }
-    if(-not $script:transport){
-        $python=Get-Command python.exe -ErrorAction SilentlyContinue | Select-Object -First 1
-        $pythonPath=if($python){$python.Source}else{Join-Path $env:USERPROFILE '.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe'}
-        if(-not [IO.File]::Exists($pythonPath)){throw 'Conexao HTTPS indisponivel neste Windows.'}
-        $pi=New-Object Diagnostics.ProcessStartInfo
-        $pi.FileName=$pythonPath;$pi.Arguments='-u "'+(Join-Path $addon 'hydra-media-transport.py')+'"'
-        $pi.UseShellExecute=$false;$pi.CreateNoWindow=$true;$pi.RedirectStandardInput=$true;$pi.RedirectStandardOutput=$true
-        $script:transport=[Diagnostics.Process]::Start($pi)
-    }
-    $script:transport.StandardInput.WriteLine((ConvertTo-Json @{url=$url;path=$tmp} -Compress));$script:transport.StandardInput.Flush()
-    $line=$script:transport.StandardOutput.ReadLine();if(-not $line){throw 'Transporte HTTPS encerrado.'}
-    $reply=$line | ConvertFrom-Json;if(-not $reply.ok){throw "HTTP $($reply.status): $($reply.error)"}
-    [IO.File]::Move($tmp,$path);$script:downloads++
+    Receive-HydraMedia $url $path
+    $script:downloads++
 }
 function Details-Normalize([string]$title){
     $title=$title -replace '\([^)]*\)|\[[^]]*\]',' '
@@ -118,6 +99,5 @@ try{
     if($result){$result.Status='error';$result.Errors+= $_.Exception.Message;$result.Downloads=$script:downloads;Save-Details $result}
     Write-Error $_
 }finally{
-    if($script:transport){$script:transport.StandardInput.Close();if(-not $script:transport.WaitForExit(1500)){$script:transport.Kill()};$script:transport.Dispose()}
     $mutex.ReleaseMutex();$mutex.Dispose()
 }
