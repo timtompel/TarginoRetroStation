@@ -1,8 +1,8 @@
-# Targino RetroStation
+﻿# Targino RetroStation
 
 ![Targino Social Media](assets/banner.png)
 
-Frontend independente para **Hydra Frontend**, com biblioteca por sistemas, capas, busca, favoritos, controle, música e modo Big Picture. Não é o Hydra Launcher comercial. Versão 1.5.0: evolução do complemento TarginoLauncher 1.4.2 para Hydra; não confundir com o projeto de recompilados do Central Arquivista.
+Frontend independente para **Hydra Frontend**, com biblioteca por sistemas, capas, busca, favoritos, controle, música e modo Big Picture. Não é o Hydra Launcher comercial. Versão 1.5.1: evolução do complemento TarginoLauncher 1.4.2 para Hydra; não confundir com o projeto de recompilados do Central Arquivista.
 
 ## Instalar
 
@@ -25,11 +25,11 @@ Uma assinatura de manifesto não é um certificado Authenticode. Nenhum token Gi
 
 ## Migrar do complemento antigo
 
-Na primeira instalação, mantenha marcada a opção de migrar dados do antigo `TarginoLauncher`, dentro da mesma raiz Hydra. A origem precisa conter `HydraLibrary.ps1`; uma instalação do Arquivista não será migrada. Favoritos, preferências e mídia são copiados, e os caminhos relativos do complemento são ajustados. A pasta antiga e jogos/BIOS/saves permanecem intactos. Use somente o novo atalho após migrar. Faça backup antes de desinstalar qualquer versão antiga.
+Na primeira atualização, mantenha marcada a opção de reaproveitar e consolidar o antigo `TarginoLauncher`, dentro da mesma raiz Hydra. A origem precisa ser identificada como complemento Hydra; uma instalação do Arquivista não será migrada. Se só existir a pasta antiga, ela será renomeada sem duplicar a mídia. Se ambas existirem, os dados atuais do RetroStation prevalecem: arquivos antigos ausentes são transferidos, cópias idênticas são retiradas e versões diferentes são guardadas em um backup ZIP verificado. Os caminhos internos são ajustados, incluindo músicas e imagens pessoais. ROMs, BIOS e saves não são movidos. Arquivos desconhecidos da raiz e instaladores baixados não são apagados. A pasta antiga só é retirada quando vazia; arquivos bloqueados não são forçados. O backup fica em `TarginoRetroStation/Backups/Migracao-1.4.2`. Use o novo atalho após migrar.
 
 ## Compilar / publicar
 
-Windows x64, Windows PowerShell 5.1 e compilador C# do .NET Framework 4.x. Execute `powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File installer/Build.ps1`. Recursos de marca já estão incluídos; não é preciso Python para compilar. A versão inicial é 1.5.0. A chave pública vem em `src/UpdatePublicKey.xml`; a privada do publicador é protegida por DPAPI e nunca faz parte deste projeto ou das releases. Não substitua a chave pública em futuras versões.
+Windows x64, Windows PowerShell 5.1 e compilador C# do .NET Framework 4.x. Execute `powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File installer/Build.ps1`. Recursos de marca já estão incluídos; não é preciso Python para compilar. A versão inicial é 1.5.1. A chave pública vem em `src/UpdatePublicKey.xml`; a privada do publicador é protegida por DPAPI e nunca faz parte deste projeto ou das releases. Não substitua a chave pública em futuras versões.
 
 Os testes usam instalações sintéticas, sem ROMs ou BIOS reais. A aprovação desses testes não comprova compatibilidade de todos os jogos, placas ou cores. Não foram corrigidas as limitações conhecidas do modo Software do PS2 neste computador.
 

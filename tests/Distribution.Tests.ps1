@@ -1,8 +1,8 @@
-$ErrorActionPreference='Stop'
+﻿$ErrorActionPreference='Stop'
 $project=Split-Path $PSScriptRoot
 $fixture=Join-Path $project ('build\test-'+[guid]::NewGuid().ToString('N'))
 [void][IO.Directory]::CreateDirectory($fixture)
-$setup=Join-Path $project 'dist\TarginoRetroStation-1.5.0-Setup.exe'
+$setup=Join-Path $project 'dist\TarginoRetroStation-1.5.1-Setup.exe'
 [IO.File]::WriteAllBytes((Join-Path $fixture 'hydra.exe'),[byte[]]@(77,90,0,0))
 foreach($dir in @('roms','bios','Saves')){[void][IO.Directory]::CreateDirectory((Join-Path $fixture $dir));[IO.File]::WriteAllText((Join-Path $fixture ($dir+'\preservar.txt')),'fixture-nao-e-jogo')}
 $before=@{};Get-ChildItem -LiteralPath $fixture -File -Recurse|ForEach-Object {$before[$_.FullName]=(Get-FileHash -LiteralPath $_.FullName).Hash}
@@ -18,15 +18,17 @@ Write-Output 'CLEAN_INSTALL_REINSTALL_BACKUP_USER_STATE_AND_EXTERNAL_FILES_OK'
 # Isolated migration test using installer private entry, no shortcuts/registry.
 $old=Join-Path $fixture 'TarginoLauncher';[void][IO.Directory]::CreateDirectory((Join-Path $old 'Dados'));[void][IO.Directory]::CreateDirectory((Join-Path $old 'Midia'))
 [IO.File]::WriteAllText((Join-Path $old 'HydraLibrary.ps1'),'# fixture Hydra')
+[IO.File]::WriteAllText((Join-Path $old 'Launcher.ps1'),'# fixture launcher')
 [IO.File]::WriteAllText((Join-Path $old 'Dados\preferencias.json'),'{"Background":"TarginoLauncher\\Midia\\fundo.png"}')
 [IO.File]::WriteAllText((Join-Path $old 'Midia\fundo.png'),'fixture-image')
-$asm=[Reflection.Assembly]::LoadFile($setup);$method=$asm.GetType('Installer').GetMethod('MigratePrevious',[Reflection.BindingFlags]'Static,NonPublic');[void]$method.Invoke($null,[object[]]@([string]$fixture,[string]$addon))
+Install-Fixture '--test-migrate'
 $prefs=[IO.File]::ReadAllText((Join-Path $addon 'Dados\preferencias.json'))|ConvertFrom-Json
 if($prefs.Background -cne 'TarginoRetroStation\Midia\fundo.png'){throw 'Migracao de caminhos falhou'}
-if(-not(Test-Path (Join-Path $old 'Midia\fundo.png')) -or -not(Test-Path (Join-Path $addon 'Midia\fundo.png'))){throw 'Migracao de midia falhou'}
-Write-Output 'MIGRATION_WITHOUT_DELETING_OLD_INSTALL_OK'
+if((Test-Path -LiteralPath $old) -or -not(Test-Path (Join-Path $addon 'Midia\fundo.png'))){throw 'Consolidacao de midia falhou'}
+if(-not(Get-ChildItem -LiteralPath (Join-Path $addon 'Backups\Migracao-1.4.2') -Recurse -Filter '*.zip')){throw 'Backup das diferencas ausente'}
+Write-Output 'TWO_FOLDERS_CONSOLIDATED_WITHOUT_DUPLICATING_MEDIA_AND_DIFFERENCES_BACKED_UP_OK'
 Add-Type -AssemblyName System.IO.Compression.FileSystem
-$z=[IO.Compression.ZipFile]::OpenRead((Join-Path $project 'dist\TarginoRetroStation-1.5.0-Arquivos.zip'))
+$z=[IO.Compression.ZipFile]::OpenRead((Join-Path $project 'dist\TarginoRetroStation-1.5.1-Arquivos.zip'))
 try{foreach($e in $z.Entries){if($e.FullName -match '(?i)(^|/)(bios|roms|Saves|cores|Cache|Logs|hydra\.exe|usuario\.json|fontes-dados\.json|layout\.json)(/|$)'){throw ('Conteudo proibido '+$e.FullName)}}}finally{$z.Dispose()}
 Write-Output 'NO_HYDRA_ROMS_BIOS_SAVES_OR_PERSONAL_DATA_IN_PAYLOAD_OK'
 # Parse and initialize actual WinForms launcher without starting UI/network/game processes.
@@ -34,6 +36,7 @@ $source=[IO.File]::ReadAllText((Join-Path $addon 'Launcher.ps1'))
 $assignment='$Arq = $PSScriptRoot.TrimEnd(''\''); $Root = [IO.Path]::GetDirectoryName($Arq).TrimEnd(''\'')'
 $source=$source.Replace($assignment,('$Arq = '''+$addon+'''; $Root = '''+$fixture+''''))
 $source=$source.Replace('Initialize-RetroStationUpdates','# network disabled only in fixture')
+$source=$source.Replace('InitializeTarginoWelcome',"Write-Verbose 'welcome disabled only in fixture'")
 $source=$source.Replace('[void]$form.ShowDialog()',@'
 if($S.Title -ne 'Targino RetroStation' -or $S.HeaderText -ne 'Targino RetroStation'){throw 'Nome incorreto'}
 if($script:TaskId -notlike 'TarginoRetroStation.Launcher.*'){throw 'AppID incorreto'}
@@ -43,6 +46,22 @@ if(Unlock){throw 'Area privilegiada sem senha local'}
 if(-not (Get-Command Start-RetroStationUpdate -ErrorAction SilentlyContinue)){throw 'Menu update nao conectado'}
 if(-not $script:TaskIcon){throw 'Icone ausente'}
 InitFilter;CatRefresh;ApplyLayout;Populate
+$form.Show();[Windows.Forms.Application]::DoEvents()
+$mouseEnter=[Windows.Forms.Control].GetMethod('OnMouseEnter',[Reflection.BindingFlags]'Instance,NonPublic')
+for($cycle=0;$cycle -lt 5;$cycle++){
+    if($script:BigPictureEnabled){BigPictureToggle}
+    $script:BigPictureButton.PerformClick();[Windows.Forms.Application]::DoEvents()
+    if(-not $script:BigPictureEnabled){throw 'Big Picture nao ativou'}
+    $script:BigPictureButton.PerformClick();[Windows.Forms.Application]::DoEvents()
+    [void]$mouseEnter.Invoke($grid,@([EventArgs]::Empty));[Windows.Forms.Application]::DoEvents()
+    if(-not $script:BigPictureSidebar -or -not $script:BigPictureRail.Visible){throw 'Menu fechou ao entrar mouse na lista'}
+    $script:BigPictureButtons[4].PerformClick();[Windows.Forms.Application]::DoEvents()
+    if($script:BigPictureEnabled -or $script:BigPictureSidebar -or $script:BigPictureRail.Visible){throw 'Menu residual no classico'}
+    if($top.Visible -ne [bool]($S.ShowSearch -or $S.ShowFilter -or $script:Dev)){throw 'Busca/filtros nao restaurados'}
+    BigPictureFocusMenu
+    if($script:BigPictureSidebar){throw 'Menu abriu no classico'}
+}
+'BIG_PICTURE_CLASSIC_TRANSITIONS_AND_MOUSE_FOCUS_REGRESSION_OK'
 $form.Dispose()
 'RETROSTATION_IDENTITY_ICON_UI_AND_LEGACY_UPDATER_DISABLED_OK'
 '@)

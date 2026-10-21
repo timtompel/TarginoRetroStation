@@ -17,8 +17,8 @@ using System.Windows.Forms;
 [assembly: AssemblyVersion("1.4.1.1")]
 [assembly: AssemblyFileVersion("1.4.1.1")]
 #elif STABLE_RELEASE
-[assembly: AssemblyVersion("1.5.0.0")]
-[assembly: AssemblyFileVersion("1.5.0.0")]
+[assembly: AssemblyVersion("1.5.1.0")]
+[assembly: AssemblyFileVersion("1.5.1.0")]
 #elif LIVE_TEST
 [assembly: AssemblyVersion("1.4.0.11")]
 [assembly: AssemblyFileVersion("1.4.0.11")]
@@ -39,7 +39,7 @@ using System.Windows.Forms;
 [assembly: AssemblyFileVersion("1.3.0.0")]
 #endif
 [assembly: AssemblyProduct("TarginoRetroStation")]
-[assembly: AssemblyInformationalVersion("1.5.0")]
+[assembly: AssemblyInformationalVersion("1.5.1")]
 public class PackageFile { public string Path {get;set;} public string Sha256 {get;set;} }
 public class PackageManifest { public string Version {get;set;} public PackageFile[] Files {get;set;} }
 public class Installer : Form
@@ -63,7 +63,7 @@ public class Installer : Form
                 if(!Int32.TryParse(args[2],out pid)||pid<=0)throw new Exception("Processo invalido.");
                 try { using(var p=Process.GetProcessById(pid)) { if(!p.WaitForExit(60000))throw new Exception("O launcher ainda esta aberto. Atualizacao cancelada."); } }
                 catch(ArgumentException) {}
-                Install(args[1],true,false,null);
+                Install(args[1],true,true,null);
                 StartFrontend(args[1]);return 0;
             } catch(Exception ex) {MessageBox.Show(ex.Message,"Atualizacao nao concluida",MessageBoxButtons.OK,MessageBoxIcon.Error);return 1;}
         }
@@ -79,7 +79,7 @@ public class Installer : Form
 #if ASPECT_TEST
         Text="TarginoRetroStation 1.4.1 - TESTE DE PROPORCAO 1";
 #elif STABLE_RELEASE
-        Text="Instalar Targino RetroStation 1.5.0";
+        Text="Instalar Targino RetroStation 1.5.1";
 #elif LIVE_TEST
         Text="TarginoRetroStation 1.4.0 - RETORNO E MUSICA - TESTE 7";
 #elif LOCAL_FIRST
@@ -107,7 +107,7 @@ public class Installer : Form
         browse=new Button{Left=570,Top=213,Width=112,Height=31,Text="Procurar..."};Controls.Add(browse);
         browse.Click+=delegate{using(var dialog=new FolderBrowserDialog()){dialog.Description="Escolha a pasta do Hydra ja instalado";dialog.SelectedPath=destination.Text;if(dialog.ShowDialog(this)==DialogResult.OK)destination.Text=dialog.SelectedPath;}};
         shortcut=new CheckBox{Left=28,Top=264,Width=650,Height=25,Text="Criar atalho Targino RetroStation na area de trabalho",Checked=true};Controls.Add(shortcut);
-        migrate=new CheckBox{Left=28,Top=294,Width=650,Height=25,Text="Migrar dados do antigo TarginoLauncher para Hydra, se existir",Checked=true};Controls.Add(migrate);
+        migrate=new CheckBox{Left=28,Top=294,Width=650,Height=25,Text="Reaproveitar e consolidar a instalacao antiga, sem duplicar as artes",Checked=true};Controls.Add(migrate);
         progress=new ProgressBar{Left=28,Top=334,Width=654,Height=18};Controls.Add(progress);
         status=AddLabel("A instalacao atual do Hydra e os seus jogos serao preservados.",28,360,654,32,9,Color.Silver);
         install=new Button{Left=502,Top=401,Width=180,Height=35,Text="Instalar complemento",BackColor=Color.FromArgb(35,133,207),ForeColor=Color.White,FlatStyle=FlatStyle.Flat};Controls.Add(install);
@@ -184,7 +184,10 @@ public class Installer : Form
         string addon=Path.Combine(root,"TarginoRetroStation");
         if(Directory.Exists(addon) && (File.GetAttributes(addon)&FileAttributes.ReparsePoint)!=0)throw new Exception("A pasta TarginoRetroStation e um link. Escolha uma instalacao com pasta local.");
         string backup=Path.Combine(addon,@"Backups\Instalador\"+DateTime.Now.ToString("yyyyMMdd-HHmmss-fff"));
+        var migration=new LegacyMigration(root,migrate);
+        migration.Begin();
         var written=new List<string>();var backed=new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase);
+        var preservedBrand=new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         try {
             using(var stream=Assembly.GetExecutingAssembly().GetManifestResourceStream("hydra.payload.zip"))
             using(var zip=new ZipArchive(stream,ZipArchiveMode.Read)) {
@@ -195,15 +198,16 @@ public class Installer : Form
                     if(!destination.StartsWith(root+Path.DirectorySeparatorChar,StringComparison.OrdinalIgnoreCase))throw new Exception("Caminho invalido no pacote.");
                     if(!(entryName.StartsWith("TarginoRetroStation/",StringComparison.Ordinal)||entryName=="Abrir-TarginoRetroStation.cmd"))throw new Exception("O pacote tentou gravar fora do complemento.");
                     string parent=Path.GetDirectoryName(destination);Directory.CreateDirectory(parent);
+                    if(entryName.StartsWith("TarginoRetroStation/Marca/",StringComparison.Ordinal) && File.Exists(destination)){preservedBrand.Add(destination);continue;}
                     if(File.Exists(destination)){string copy=Path.Combine(backup,entryName.Replace('/',Path.DirectorySeparatorChar));Directory.CreateDirectory(Path.GetDirectoryName(copy));File.Copy(destination,copy,false);backed[destination]=copy;}
                     using(var input=entry.Open())using(var output=File.Create(destination))input.CopyTo(output);
                     written.Add(destination);count++;Report(report,5+count*55/Math.Max(1,zip.Entries.Count),"Instalando "+Path.GetFileName(destination));
                 }
             }
-            foreach(var file in manifest.Files){string path=Path.Combine(root,file.Path.Replace('/',Path.DirectorySeparatorChar));if(!Hash(path).Equals(file.Sha256,StringComparison.OrdinalIgnoreCase))throw new Exception("Arquivo nao passou na verificacao: "+file.Path);}
+            foreach(var file in manifest.Files){string path=Path.Combine(root,file.Path.Replace('/',Path.DirectorySeparatorChar));if(!preservedBrand.Contains(path)&&!Hash(path).Equals(file.Sha256,StringComparison.OrdinalIgnoreCase))throw new Exception("Arquivo nao passou na verificacao: "+file.Path);}
+            migration.MergeAndReanchor();
             string data=Path.Combine(addon,"Dados");Directory.CreateDirectory(data);
             string layout=Path.Combine(data,"layout.json");
-            if(migrate && !File.Exists(layout)) MigratePrevious(root,addon);
             if(!File.Exists(layout)){
                 string template=File.ReadAllText(Path.Combine(data,"layout.template.json"),Encoding.UTF8);
                 var settings=Json.Deserialize<Dictionary<string,object>>(template);
@@ -214,33 +218,15 @@ public class Installer : Form
             var psi=new ProcessStartInfo(Ps,"-NoProfile -STA -ExecutionPolicy Bypass -File \""+Path.Combine(addon,"Verificar-Dependencias-Launcher.ps1")+"\" -FrontendDir \""+addon+"\""){UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,WorkingDirectory=root};
             using(var process=Process.Start(psi)){string output=process.StandardOutput.ReadToEnd();process.WaitForExit();if(process.ExitCode!=0)throw new Exception("Dependencias: "+output);}
             File.WriteAllText(Path.Combine(data,"instalacao.json"),Json.Serialize(new{Version=manifest.Version,Installed=DateTime.Now.ToString("s"),Location=addon}),new UTF8Encoding(true));
+            migration.Commit();
             if(createShortcut){Report(report,90,"Criando atalho...");CreateShortcut(root);}
-            Report(report,100,"Complemento instalado.");
+            Report(report,100,"Complemento instalado. "+migration.Summary);
         } catch {
+            if(migration.CleanupCommitted)throw;
+            try{migration.RollbackChanges();}catch{}
             foreach(string file in written){try{if(backed.ContainsKey(file))File.Copy(backed[file],file,true);else File.Delete(file);}catch{}}
+            try{migration.UndoRename();}catch{}
             throw;
-        }
-    }
-    static void MigratePrevious(string root,string addon)
-    {
-        string previous=Path.Combine(root,"TarginoLauncher");
-        if(!Directory.Exists(previous))return;
-        if(!File.Exists(Path.Combine(previous,"HydraLibrary.ps1")))throw new Exception("A pasta antiga nao foi identificada como complemento Hydra; migracao recusada.");
-        foreach(string source in Directory.GetFiles(Path.Combine(previous,"Dados"),"*",SearchOption.TopDirectoryOnly)){
-            string file=Path.GetFileName(source);
-            if(!(file.EndsWith(".json",StringComparison.OrdinalIgnoreCase)||file=="ultimo_filtro.txt"))continue;
-            if(file=="instalacao.json"||file=="atualizacao.json"||file=="layout.template.json")continue;
-            string from=Path.Combine(previous,"Dados",file),to=Path.Combine(addon,"Dados",file);
-            if(File.Exists(from)&&!File.Exists(to)){
-                string text=File.ReadAllText(from,Encoding.UTF8);
-                text=text.Replace("TarginoLauncher\\\\","TarginoRetroStation\\\\").Replace("TarginoLauncher\\","TarginoRetroStation\\");
-                File.WriteAllText(to,text,new UTF8Encoding(true));
-            }
-        }
-        string oldMedia=Path.Combine(previous,"Midia"),newMedia=Path.Combine(addon,"Midia");
-        if(Directory.Exists(oldMedia))foreach(string from in Directory.GetFiles(oldMedia,"*",SearchOption.AllDirectories)){
-            string to=Path.Combine(newMedia,from.Substring(oldMedia.Length+1));if(File.Exists(to))continue;
-            Directory.CreateDirectory(Path.GetDirectoryName(to));File.Copy(from,to,false);
         }
     }
     static void CreateShortcut(string root)
@@ -250,6 +236,16 @@ public class Installer : Form
         dynamic link=shell.CreateShortcut(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),"Targino RetroStation.lnk"));
         link.TargetPath=Ps;link.Arguments="-NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File \""+Path.Combine(root,@"TarginoRetroStation\Launcher.ps1")+"\"";
         link.WorkingDirectory=root;link.Description="Targino RetroStation - complemento visual";link.IconLocation=Path.Combine(root,@"TarginoRetroStation\Launcher.ico")+",0";link.Save();
+        string oldLink=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),"TarginoLauncher.lnk");
+        if(File.Exists(oldLink)&&!Directory.Exists(Path.Combine(root,"TarginoLauncher"))){
+            dynamic previous=shell.CreateShortcut(oldLink);
+            string args=(string)previous.Arguments,oldScript=Path.Combine(root,@"TarginoLauncher\Launcher.ps1");
+            if(args.IndexOf(oldScript,StringComparison.OrdinalIgnoreCase)>=0){
+                string backup=Path.Combine(root,@"TarginoRetroStation\Backups\Atalhos\"+DateTime.Now.ToString("yyyyMMdd-HHmmss-fff"));
+                Directory.CreateDirectory(backup);string copy=Path.Combine(backup,"TarginoLauncher.lnk");File.Copy(oldLink,copy,false);
+                if(Hash(copy)==Hash(oldLink))File.Delete(oldLink);
+            }
+        }
     }
     static void StartFrontend(string root)
     {

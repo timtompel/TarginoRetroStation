@@ -1,10 +1,10 @@
 ﻿# Public presentation and help. No privileged settings or credentials here.
-$script:TarginoWelcomeVersion='1.5.0'
+$script:TarginoWelcomeVersion='1.5.1'
 $script:TarginoChannelUrl='https://www.youtube.com/@targino.socialmedia'
 function TarginoWelcomeContent {
     @(
         @{Tab='Apresentação';Title='Sua biblioteca. Seu controle. Seu jeito de jogar.';Banner=$true;Body=@'
-Bem-vindo ao Targino RetroStation 1.5.0!
+Bem-vindo ao Targino RetroStation 1.5.1!
 
 Um complemento visual independente para organizar e iniciar os jogos da sua instalação do Hydra. Escolha o sistema, encontre o jogo e entre na diversão com teclado, mouse ou controle.
 
@@ -81,18 +81,18 @@ As opções de fontes de dados e cache estão em Personalizar e Filtros. Uma cha
 ATUALIZAR O COMPLEMENTO
 Use Filtros > Verificar atualizações do RetroStation. A consulta automática ocorre diariamente em segundo plano; você confirma antes de instalar. Só releases estáveis assinadas do repositório TarginoRetroStation são aceitas. Seus dados são preservados e os arquivos substituídos recebem backup.
 '@}
-        @{Tab='Novidades';Title='O que mudou: 1.4.2 → 1.5.0 estável';Body=@'
+        @{Tab='Novidades';Title='O que mudou: 1.5.0 → 1.5.1 estável';Body=@'
 TARGINO RETROSTATION
 Novo nome e identificador próprios, sem misturar com o launcher de recompilados do Arquivista. Avatar e banner do Targino foram mantidos.
 
 ATUALIZAÇÃO ONLINE EXCLUSIVA
-Consulta em segundo plano, com instalação somente após confirmação. Apenas releases estáveis do RetroStation, com assinatura RSA-SHA256, tamanho e hash conferidos. Jogos devem estar fechados. Hydra, cores, ROMs, BIOS e saves não são atualizados por esse mecanismo.
+Consulta em segundo plano, com as opcoes Atualizar agora e Agora nao. Nada e instalado sem confirmacao. Apenas releases estáveis do RetroStation, com assinatura RSA-SHA256, tamanho e hash conferidos. Jogos devem estar fechados. Hydra, cores, ROMs, BIOS e saves não são atualizados por esse mecanismo.
 
 MANUAL OFFLINE
 Filtros > Manual do RetroStation traz instalação, controles, música, artes, BIOS, CUE/BIN, saves, janela para OBS e diagnóstico. Também pode ser impresso pelo navegador.
 
 MIGRAÇÃO OPCIONAL
-O instalador pode copiar preferências, favoritos e mídia do antigo complemento TarginoLauncher para Hydra na mesma raiz. A pasta anterior é preservada e o Arquivista não é migrado.
+O instalador pode copiar preferências, favoritos e mídia do antigo complemento TarginoLauncher para Hydra na mesma raiz. A pasta anterior e reaproveitada ou consolidada, evitando duplicar as artes. Diferencas ficam em backup verificado. O Arquivista nao e migrado.
 
 MANTIDO DA 1.4.2
 O download de artes possui alternativas nativas do Windows para falhas do transporte inicial, sem depender de uma instalação de Python. Certificados HTTPS continuam sendo verificados.
@@ -147,14 +147,14 @@ function TarginoWelcomeInput([string]$key,$dialog){
     }
 }
 function New-TarginoWelcomeDialog($state){
-    $dialog=New-Object Windows.Forms.Form -Property @{Text='TarginoRetroStation 1.5.0 — Apresentação e ajuda';ClientSize='1000,740';MinimumSize='850,680';StartPosition='CenterParent';BackColor=[Drawing.Color]::FromArgb(10,18,31);ForeColor=[Drawing.Color]::White;Font=(New-Object Drawing.Font('Segoe UI',11));KeyPreview=$true;MinimizeBox=$false}
+    $dialog=New-Object Windows.Forms.Form -Property @{Text='TarginoRetroStation 1.5.1 — Apresentação e ajuda';ClientSize='1000,740';MinimumSize='850,680';StartPosition='CenterParent';BackColor=[Drawing.Color]::FromArgb(10,18,31);ForeColor=[Drawing.Color]::White;Font=(New-Object Drawing.Font('Segoe UI',11));KeyPreview=$true;MinimizeBox=$false}
     $header=New-Object Windows.Forms.Panel -Property @{Dock='Top';Height=104;BackColor=[Drawing.Color]::FromArgb(17,34,56)}
     $avatar=New-Object Windows.Forms.PictureBox -Property @{Left=16;Top=7;Width=88;Height=88;SizeMode='Zoom'}
     $owned=New-Object 'Collections.Generic.List[Drawing.Image]'
     $avatarPath=Join-Path $Arq 'Marca\avatar.png'
     if([IO.File]::Exists($avatarPath)){$source=[Drawing.Image]::FromFile($avatarPath);try{$avatar.Image=New-Object Drawing.Bitmap($source);$owned.Add($avatar.Image)}finally{$source.Dispose()}}
     $title=New-Object Windows.Forms.Label -Property @{Text='TarginoRetroStation';Left=120;Top=17;Width=650;Height=40;Font=(New-Object Drawing.Font('Segoe UI',25,[Drawing.FontStyle]::Bold));ForeColor=[Drawing.Color]::FromArgb(100,195,255)}
-    $subtitle=New-Object Windows.Forms.Label -Property @{Text='1.5.0 ESTÁVEL   •   Complemento para o Hydra   •   Por Targino.SocialMedia';Left=122;Top=64;Width=830;Height=28;Font=(New-Object Drawing.Font('Segoe UI',10))}
+    $subtitle=New-Object Windows.Forms.Label -Property @{Text='1.5.1 ESTÁVEL   •   Complemento para o Hydra   •   Por Targino.SocialMedia';Left=122;Top=64;Width=830;Height=28;Font=(New-Object Drawing.Font('Segoe UI',10))}
     $header.Controls.AddRange(@($avatar,$title,$subtitle))
     $tabs=New-Object Windows.Forms.TabControl -Property @{Dock='Fill';Padding=(New-Object Drawing.Point(17,9))}
     foreach($content in @(TarginoWelcomeContent)){

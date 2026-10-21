@@ -13,6 +13,7 @@ function BigPictureLayout {
         foreach($button in $script:BigPictureButtons){$button.Width=$railWidth-24}
         $top.Visible=$false
     }else{
+        $top.Visible=[bool]($S.ShowSearch -or $S.ShowFilter -or $script:Dev)
         $libP.Dock='Bottom';$script:BackgroundPic.Visible=$true
         $libP.Padding=New-Object Windows.Forms.Padding(0)
         $libP.Height=354
@@ -20,16 +21,27 @@ function BigPictureLayout {
     $script:BackgroundPic.Invalidate();$grid.Invalidate()
 }
 function BigPictureToggle {
+    $script:BigPictureFocusChanging=$true
+    $form.SuspendLayout();$script:BigPictureContent.SuspendLayout()
+    try{
     $script:BigPictureEnabled=-not $script:BigPictureEnabled
     $script:BigPictureSidebar=$false
     [void](WriteJson (Join-Path $DataDir 'bigpicture.json') @{Enabled=$script:BigPictureEnabled} 3)
-    ApplyCinema;[void]$grid.Focus()
+    ApplyCinema;BigPictureHighlight;[void]$grid.Focus()
+    }finally{
+        $script:BigPictureContent.ResumeLayout($true);$form.ResumeLayout($true)
+        $script:BigPictureFocusChanging=$false
+    }
 }
 function BigPictureFocusMenu {
+    if(-not $script:BigPictureEnabled){return}
+    $script:BigPictureFocusChanging=$true
+    try{
     $script:BigPictureSidebar=$true
     BigPictureLayout
     BigPictureHighlight
     [void]$script:BigPictureButtons[$script:BigPictureMenuIndex].Focus()
+    }finally{$script:BigPictureFocusChanging=$false}
 }
 function BigPictureFocusLibrary {
     # Move focus before hiding its current owner. Otherwise WinForms can move
@@ -49,6 +61,8 @@ function BigPictureHighlight {
     }
 }
 function BigPictureMenuAction([int]$index) {
+    # Switch directly, without first drawing the Big Picture library again.
+    if($index -eq 4){BigPictureToggle;return}
     BigPictureFocusLibrary
     switch($index){
         0 {HydraShowSystems}
@@ -113,7 +127,7 @@ function InitializeBigPicture {
     $mainP.Controls.Add($script:BigPictureContent);$mainP.Controls.SetChildIndex($script:BigPictureContent,0)
     $script:BigPictureRail=New-Object Windows.Forms.Panel -Property @{Dock='Left';BackColor=[Drawing.Color]::FromArgb(13,20,31);TabStop=$false;AutoScroll=$true}
     $script:BigPictureContent.Controls.AddRange(@($script:BackgroundPic,$libP,$script:BigPictureRail))
-    $caption=New-Object Windows.Forms.Label -Property @{Text="BIG PICTURE`nTARGINO LAUNCHER";Left=16;Top=18;Width=170;Height=55;ForeColor=[Drawing.Color]::LightSkyBlue;Font=(New-Object Drawing.Font('Segoe UI',10,[Drawing.FontStyle]::Bold))}
+    $caption=New-Object Windows.Forms.Label -Property @{Text="BIG PICTURE`nTARGINO RETROSTATION";Left=16;Top=18;Width=170;Height=55;ForeColor=[Drawing.Color]::LightSkyBlue;Font=(New-Object Drawing.Font('Segoe UI',10,[Drawing.FontStyle]::Bold))}
     $script:BigPictureRail.Controls.Add($caption)
     $script:BigPictureButtons=@();$labels=@('Sistemas','Favoritos','Buscar','Personalizar','Visual clássico','Ajuda e novidades','Sair')
     for($i=0;$i -lt $labels.Count;$i++){

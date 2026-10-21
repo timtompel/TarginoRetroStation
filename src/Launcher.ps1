@@ -1,5 +1,5 @@
 ﻿Add-Type -AssemblyName System.Windows.Forms, System.Drawing
-$AppVer = '1.5.0'
+$AppVer = '1.5.1'
 $script:T0 = [Diagnostics.Stopwatch]::StartNew()      # tempo de abertura (vai para o log e para o diagnóstico)
 # O Launcher.ps1 fica em TarginoRetroStation\; a pasta do launcher ($Root) é a de cima (onde ficam só o executável e Jogos\).
 #  Tudo é relativo a $Root: a pasta pode ser copiada para outro HD ou renomeada.
@@ -6023,7 +6023,7 @@ $scrTm.Add_Tick({
     $script:ScrAnim = $true
     try { $vsb.Value = $nv } finally { $script:ScrAnim = $false }
 })
-$grid.Add_MouseEnter({ if ((FormActive) -and -not $q.Focused) { [void]$grid.Focus() } })   # só com o launcher ativo (v2.37.4)
+$grid.Add_MouseEnter({ if ((FormActive) -and -not $q.Focused -and -not $script:BigPictureSidebar -and -not $script:BigPictureFocusChanging) { [void]$grid.Focus() } })
 $grid.Add_MouseWheel({ param($snd, $we)
     if ($S.CinemaMode) {
         if ($script:View.Count) { SelectIdx ([Math]::Max(0,[Math]::Min($script:View.Count-1,$script:CurIdx-[Math]::Sign($we.Delta)))) 'single' }

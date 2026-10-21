@@ -1,7 +1,7 @@
-param()
+﻿param()
 $ErrorActionPreference='Stop'
 $project=Split-Path $PSScriptRoot
-$version='1.5.0'
+$version='1.5.1'
 $out=Join-Path $project 'dist'
 $stage=Join-Path $project ('build\'+[guid]::NewGuid().ToString('N'))
 $addon=Join-Path $stage 'TarginoRetroStation'
@@ -38,6 +38,6 @@ Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
 $zipStream=[IO.File]::Create($zip);$archive=New-Object IO.Compression.ZipArchive($zipStream,[IO.Compression.ZipArchiveMode]::Create)
 try{foreach($f in Get-ChildItem -LiteralPath $stage -Recurse -File){if($f.FullName -eq $manifestPath){continue};$rel=$f.FullName.Substring($stage.Length+1).Replace('\','/');[void][IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive,$f.FullName,$rel,[IO.Compression.CompressionLevel]::Optimal)}}finally{$archive.Dispose();$zipStream.Dispose()}
 $setup=Join-Path $out ('TarginoRetroStation-'+$version+'-Setup.exe')
-& $csc /nologo /target:winexe /platform:x64 /optimize+ /define:STABLE_RELEASE ('/out:'+$setup) ('/win32icon:'+(Join-Path $project 'assets\Launcher.ico')) ('/win32manifest:'+(Join-Path $PSScriptRoot 'app.manifest')) /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.IO.Compression.dll /r:System.IO.Compression.FileSystem.dll /r:System.Web.Extensions.dll /r:Microsoft.CSharp.dll ('/resource:'+$zip+',hydra.payload.zip') ('/resource:'+$manifestPath+',hydra.manifest.json') (Join-Path $PSScriptRoot 'Setup.cs')
+& $csc /nologo /target:winexe /platform:x64 /optimize+ /define:STABLE_RELEASE ('/out:'+$setup) ('/win32icon:'+(Join-Path $project 'assets\Launcher.ico')) ('/win32manifest:'+(Join-Path $PSScriptRoot 'app.manifest')) /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.IO.Compression.dll /r:System.IO.Compression.FileSystem.dll /r:System.Web.Extensions.dll /r:Microsoft.CSharp.dll ('/resource:'+$zip+',hydra.payload.zip') ('/resource:'+$manifestPath+',hydra.manifest.json') (Join-Path $PSScriptRoot 'Setup.cs') (Join-Path $PSScriptRoot 'LegacyMigration.cs')
 if($LASTEXITCODE -ne 0){throw 'Falha ao compilar instalador'}
 [pscustomobject]@{Installer=$setup;Stage=$stage;Files=$manifest.Files.Count}|ConvertTo-Json
