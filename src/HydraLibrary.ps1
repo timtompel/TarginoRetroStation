@@ -1,4 +1,5 @@
-﻿# System navigation and persistent artwork integration for TarginoRetroStation.
+# System navigation and persistent artwork integration for TarginoRetroStation.
+. (Join-Path $PSScriptRoot 'HydraArtworkMatching.ps1')
 $metadataModule=Join-Path $PSScriptRoot 'HydraMetadata.ps1'
 if([IO.File]::Exists($metadataModule)){. $metadataModule}
 $liveModule=Join-Path $PSScriptRoot 'TarginoLive.ps1'
@@ -75,7 +76,8 @@ function HydraInitializeLibrary {
             $artPath='TarginoRetroStation\Midia\Capas\'+(HydraMediaHash $game.Id)+'.png'
             $game | Add-Member NoteProperty HydraArt $artPath -Force
             $game | Add-Member NoteProperty HydraSystemId $manifest.id -Force
-            $script:HydraArtGames += [pscustomobject]@{Key=('game:'+$game.Id);Kind='game';SystemId=$manifest.id;SystemName=$systemName;Name=$game.HydraRawName;Color=$color;Path=$artPath;Repository=$script:HydraRepositories[$manifest.id]}
+            $queryName=if($game.PSObject.Properties['RemoteTitle']){$game.RemoteTitle}else{$game.HydraRawName}
+            $script:HydraArtGames += [pscustomobject]@{Key=('game:'+$game.Id);Kind='game';SystemId=$manifest.id;SystemName=$systemName;Name=(Get-HydraArtworkQueryTitle $queryName);Color=$color;Path=$artPath;Repository=$script:HydraRepositories[$manifest.id]}
         }
     }
     $script:HydraSystemCards=@($script:HydraSystemCards | Sort-Object Name)
@@ -161,11 +163,8 @@ function HydraArtworkSummary([int]$saved,[int]$failed,[int]$notFound){
     if($failed -gt 0 -or $notFound -gt 0){return "Artes: $saved salvas · $failed falhas · $notFound sem correspondência"}
     return "Artes salvas: $saved · cache local"
 }
-function HydraArtworkRetryDue($entry){
-    if(-not $entry -or $entry.Status -ne 'error'){return $false}
-    if($entry.TransportVersion -ne 2){return $true}
-    $checked=[datetime]::MinValue
-    return (-not [datetime]::TryParse([string]$entry.Checked,[ref]$checked) -or ([datetime]::UtcNow-$checked.ToUniversalTime()).TotalMinutes -ge 30)
+function HydraArtworkRetryDue($entry,[string]$name=''){
+    return (Test-HydraArtworkRetryDue $entry $name)
 }
 function HydraStartArtwork {
     if($script:HydraArtworkProcess -and -not $script:HydraArtworkProcess.HasExited){return}
@@ -175,7 +174,7 @@ function HydraStartArtwork {
     $savedCount=0;$failedCount=0;$notFoundCount=0
     foreach($item in $items){
         $entry=if($known -and $known.PSObject.Properties[$item.Key]){$known.($item.Key)}else{$null}
-        if(-not $entry -or $entry.StyleVersion -ne 2 -or -not [IO.File]::Exists((Full $item.Path)) -or (HydraArtworkRetryDue $entry)){$complete=$false;break}
+        if(-not $entry -or $entry.StyleVersion -ne 2 -or -not [IO.File]::Exists((Full $item.Path)) -or (HydraArtworkRetryDue $entry $item.Name)){$complete=$false;break}
         switch($entry.Status){'downloaded'{$savedCount++}'error'{$failedCount++}default{$notFoundCount++}}
     }
     if($complete){$script:HydraArtStatus=HydraArtworkSummary $savedCount $failedCount $notFoundCount;return}

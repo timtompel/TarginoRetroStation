@@ -1,5 +1,5 @@
-﻿Add-Type -AssemblyName System.Windows.Forms, System.Drawing
-$AppVer = '1.5.2'
+Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+$AppVer = '1.5.3'
 $script:T0 = [Diagnostics.Stopwatch]::StartNew()      # tempo de abertura (vai para o log e para o diagnóstico)
 # O Launcher.ps1 fica em TarginoRetroStation\; a pasta do launcher ($Root) é a de cima (onde ficam só o executável e Jogos\).
 #  Tudo é relativo a $Root: a pasta pode ser copiada para outro HD ou renomeada.

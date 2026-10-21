@@ -1,12 +1,12 @@
-﻿# Targino RetroStation
+# Targino RetroStation
 
 ![Targino Social Media](assets/banner.png)
 
-Frontend independente para **Hydra Frontend**, com biblioteca por sistemas, capas, busca, favoritos, controle, música e modo Big Picture. Não é o Hydra Launcher comercial. Versão 1.5.2: evolução do complemento TarginoLauncher 1.4.2 para Hydra; não confundir com o projeto de recompilados do Central Arquivista.
+Frontend independente para **Hydra Frontend**, com biblioteca por sistemas, capas, busca, favoritos, controle, música e modo Big Picture. Não é o Hydra Launcher comercial. Versão 1.5.3: evolução do complemento TarginoLauncher 1.4.2 para Hydra; não confundir com o projeto de recompilados do Central Arquivista.
 
 ## Instalar
 
-Na 1.5.2, escolha **WebSetup.exe** (instalador pequeno que baixa e verifica a última versão estável) ou **Setup.exe** (pacote completo para instalação offline). No instalador web, Baixar instalador → aguardar validação → Instalar. Não há download de jogos/BIOS/Hydra nem atualização diferencial. Notas da limpeza e testes: [1.5.2](docs/NOTAS-1.5.2.md).
+Na 1.5.3, escolha **WebSetup.exe** (instalador pequeno que baixa e verifica a última versão estável) ou **Setup.exe** (pacote completo para instalação offline). No instalador web, Baixar instalador → aguardar validação → Instalar. Não há download de jogos/BIOS/Hydra nem atualização diferencial. Correções de artes: [1.5.3](docs/NOTAS-1.5.3.md). Histórico da limpeza: [1.5.2](docs/NOTAS-1.5.2.md).
 
 1. Instale e prepare o [Hydra oficial](https://hydrafrontend.com/) em uma pasta gravável.
 2. Baixe o instalador em [Releases](https://github.com/timtompel/TarginoRetroStation/releases/latest).

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
@@ -13,10 +13,10 @@ using System.Windows.Forms;
 
 [assembly: AssemblyTitle("Instalador TarginoRetroStation")]
 [assembly: AssemblyDescription("Complemento visual para uma instalacao existente do Hydra")]
-[assembly: AssemblyVersion("1.5.2.0")]
-[assembly: AssemblyFileVersion("1.5.2.0")]
+[assembly: AssemblyVersion("1.5.3.0")]
+[assembly: AssemblyFileVersion("1.5.3.0")]
 [assembly: AssemblyProduct("TarginoRetroStation")]
-[assembly: AssemblyInformationalVersion("1.5.2")]
+[assembly: AssemblyInformationalVersion("1.5.3")]
 public class PackageFile { public string Path {get;set;} public string Sha256 {get;set;} }
 public class PackageManifest { public string Version {get;set;} public PackageFile[] Files {get;set;} }
 public class Installer : Form
@@ -53,7 +53,7 @@ public class Installer : Form
     }
     Installer()
     {
-        Text="Instalar Targino RetroStation 1.5.2";
+        Text="Instalar Targino RetroStation 1.5.3";
         Size=new Size(740,490); MinimumSize=Size; MaximumSize=Size;
         Icon=Icon.ExtractAssociatedIcon(Assembly.GetExecutingAssembly().Location);
         StartPosition=FormStartPosition.CenterScreen; FormBorderStyle=FormBorderStyle.FixedDialog; MaximizeBox=false;

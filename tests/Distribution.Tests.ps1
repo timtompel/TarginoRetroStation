@@ -1,8 +1,8 @@
-﻿$ErrorActionPreference='Stop'
+$ErrorActionPreference='Stop'
 $project=Split-Path $PSScriptRoot
 $fixture=Join-Path $project ('build\test-'+[guid]::NewGuid().ToString('N'))
 [void][IO.Directory]::CreateDirectory($fixture)
-$setup=Join-Path $project 'dist\TarginoRetroStation-1.5.2-Setup.exe'
+$setup=Join-Path $project 'dist\TarginoRetroStation-1.5.3-Setup.exe'
 [IO.File]::WriteAllBytes((Join-Path $fixture 'hydra.exe'),[byte[]]@(77,90,0,0))
 foreach($dir in @('roms','bios','Saves')){[void][IO.Directory]::CreateDirectory((Join-Path $fixture $dir));[IO.File]::WriteAllText((Join-Path $fixture ($dir+'\preservar.txt')),'fixture-nao-e-jogo')}
 $before=@{};Get-ChildItem -LiteralPath $fixture -File -Recurse|ForEach-Object {$before[$_.FullName]=(Get-FileHash -LiteralPath $_.FullName).Hash}
@@ -35,7 +35,7 @@ if((Test-Path -LiteralPath $old) -or -not(Test-Path (Join-Path $addon 'Midia\fun
 if(-not(Get-ChildItem -LiteralPath (Join-Path $addon 'Backups\Migracao-1.4.2') -Recurse -Filter '*.zip')){throw 'Backup das diferencas ausente'}
 Write-Output 'TWO_FOLDERS_CONSOLIDATED_WITHOUT_DUPLICATING_MEDIA_AND_DIFFERENCES_BACKED_UP_OK'
 Add-Type -AssemblyName System.IO.Compression.FileSystem
-$z=[IO.Compression.ZipFile]::OpenRead((Join-Path $project 'dist\TarginoRetroStation-1.5.2-Arquivos.zip'))
+$z=[IO.Compression.ZipFile]::OpenRead((Join-Path $project 'dist\TarginoRetroStation-1.5.3-Arquivos.zip'))
 try{foreach($e in $z.Entries){if($e.FullName -match '(?i)(^|/)(bios|roms|Saves|cores|Cache|Logs|hydra\.exe|usuario\.json|fontes-dados\.json|layout\.json)(/|$)'){throw ('Conteudo proibido '+$e.FullName)}}}finally{$z.Dispose()}
 Write-Output 'NO_HYDRA_ROMS_BIOS_SAVES_OR_PERSONAL_DATA_IN_PAYLOAD_OK'
 # Parse and initialize actual WinForms launcher without starting UI/network/game processes.

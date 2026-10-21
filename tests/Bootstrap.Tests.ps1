@@ -1,7 +1,7 @@
 $ErrorActionPreference='Stop'
 $project=Split-Path $PSScriptRoot
 Add-Type -AssemblyName System.Windows.Forms
-$web=Join-Path $project 'dist\TarginoRetroStation-1.5.2-WebSetup.exe'
+$web=Join-Path $project 'dist\TarginoRetroStation-1.5.3-WebSetup.exe'
 if((Get-Item -LiteralPath $web).Length -gt 512KB){throw 'Bootstrapper grande demais'}
 $assembly=[Reflection.Assembly]::LoadFile($web)
 $names=$assembly.GetManifestResourceNames()

@@ -1,6 +1,7 @@
-﻿param([string]$Root='D:\Games\hydra', [switch]$PrepareOnly)
+param([string]$Root='D:\Games\hydra', [switch]$PrepareOnly)
 $ErrorActionPreference='Stop'
 Add-Type -AssemblyName System.Drawing
+. (Join-Path $PSScriptRoot 'HydraArtworkMatching.ps1')
 $metadataModule=Join-Path $PSScriptRoot 'HydraMetadata.ps1'
 if([IO.File]::Exists($metadataModule)){. $metadataModule}
 [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12
@@ -14,10 +15,7 @@ $script:downloads=0; $script:assetTransportVersion=3
 $script:stateWriteClock=[Diagnostics.Stopwatch]::StartNew()
 $script:progressWriteClock=[Diagnostics.Stopwatch]::StartNew()
 function Asset-RetryDue($entry){
-    if(-not $entry -or $entry.Status -ne 'error'){return $false}
-    if($entry.TransportVersion -ne $script:assetTransportVersion){return $true}
-    $checked=[datetime]::MinValue
-    return (-not [datetime]::TryParse([string]$entry.Checked,[ref]$checked) -or ([datetime]::UtcNow-$checked.ToUniversalTime()).TotalMinutes -ge 30)
+    return (Test-HydraArtworkRetryDue $entry)
 }
 $lock=New-Object Threading.Mutex($false,('Local\HydraMedia-'+$requests.RootKey))
 if(-not $lock.WaitOne(0)){ $lock.Dispose(); exit }
@@ -42,7 +40,7 @@ function Save-Progress([string]$phase,[int]$done,[int]$total){
     if($phase -ne 'Concluido' -and $phase -ne 'Artes locais prontas' -and $script:progressWriteClock.ElapsedMilliseconds -lt 250){return}
     $obj=@{Phase=$phase;Done=$done;Total=$total;Downloads=$script:downloads;Time=(Get-Date).ToString('s')}
     $obj.Saved=0;$obj.Failed=0;$obj.NotFound=0
-    foreach($key in @($state.Keys | Where-Object {-not $_.StartsWith('index:')})){
+    foreach($key in @(@($requests.Systems)+@($requests.Games)|Where-Object {$_}|ForEach-Object {$_.Key}|Select-Object -Unique)){
         switch($state[$key].Status){'downloaded'{$obj.Saved++}'error'{$obj.Failed++}'fallback'{$obj.NotFound++}}
     }
     [IO.File]::WriteAllText((Join-Path $data 'hydra-midia-progresso.json'),(ConvertTo-Json $obj),(New-Object Text.UTF8Encoding($false)))
@@ -54,12 +52,7 @@ function Get-Asset([string]$url,[string]$path){
     $script:downloads++
 }
 function Normalize-Title([string]$name){
-    $name=$name -replace '\.[^.]+$',''
-    $name=$name -replace '\([^)]*\)|\[[^]]*\]',' '
-    $name=$name -replace '(?i)[_ -]+(?:ptbr|pt-br|traduzid[ao]s?|translation|hack|v\d+\.\d+).*$',''
-    $name=$name -replace '(?i)_(?:gg|sms|snes)$',''
-    $name=$name.Normalize([Text.NormalizationForm]::FormD) -replace '\p{Mn}',''
-    ($name.ToLowerInvariant() -replace '[^a-z0-9]','')
+    Normalize-HydraArtworkTitle $name
 }
 function Write-Card($item,[string]$imagePath,[bool]$official){
     $dest=Join-Path $Root $item.Path
@@ -107,28 +100,17 @@ function Find-Boxart($item){
         if($state.ContainsKey('index:'+$sys) -and (Asset-RetryDue $state['index:'+$sys])){[void]$state.Remove('index:'+$sys)}
         if($state.ContainsKey('index:'+$sys) -and -not (Test-Path -LiteralPath $indexFile)) { throw 'Indice de capas indisponivel; aguarde 30 minutos ou use Tentar novamente artes pendentes.' }
         try {Get-Asset $url $indexFile} catch {$state['index:'+$sys]=@{Status='error';Error=$_.Exception.Message;TransportVersion=$script:assetTransportVersion;Checked=[datetime]::UtcNow.ToString('o')};Save-State;throw}
-        $html=[IO.File]::ReadAllText($indexFile)
-        $exact=@{};$normalized=@{}
-        foreach($match in [regex]::Matches($html,'href="([^"?]+\.png)"')){
-            $file=[Net.WebUtility]::HtmlDecode([Uri]::UnescapeDataString($match.Groups[1].Value))
-            $exact[$file]=$url+[Uri]::EscapeDataString($file)
-            $key=Normalize-Title $file
-            if(-not $normalized.ContainsKey($key)){$normalized[$key]=New-Object Collections.Generic.List[string]}
-            $normalized[$key].Add($file)
+        if(([datetime]::UtcNow-[IO.File]::GetLastWriteTimeUtc($indexFile)).TotalDays -ge 1){
+            $refresh=$indexFile+'.refresh-'+[guid]::NewGuid().ToString('N')
+            try{
+                Get-Asset $url $refresh
+                [void](ConvertTo-HydraArtworkCatalogue ([IO.File]::ReadAllText($refresh)) $url)
+                [IO.File]::Replace($refresh,$indexFile,($indexFile+'.bak'))
+            }finally{if([IO.File]::Exists($refresh)){[IO.File]::Delete($refresh)}}
         }
-        $catalogues[$sys]=@{Exact=$exact;Normalized=$normalized}
+        $catalogues[$sys]=ConvertTo-HydraArtworkCatalogue ([IO.File]::ReadAllText($indexFile)) $url
     }
-    $cat=$catalogues[$sys];$filename=$item.Name+'.png'
-    if($cat.Exact.ContainsKey($filename)){return $cat.Exact[$filename]}
-    $key=Normalize-Title ($item.Name+'.png')
-    $choices=@($cat.Normalized[$key] | Where-Object {$_})
-    if(-not $choices.Count -and $key.Length -ge 12){
-        $prefixes=@($cat.Normalized.Keys | Where-Object {$_.StartsWith($key)})
-        if($prefixes.Count -eq 1){$choices=@($cat.Normalized[$prefixes[0]])}
-    }
-    $choice=$choices | Where-Object {$_ -and $_ -notmatch '\((?:Beta|Proto|Demo)'} | Sort-Object @{Expression={if($_ -match '\(USA'){0}elseif($_ -match '\(World'){1}elseif($_ -match '\(Europe'){2}else{3}}},Length | Select-Object -First 1
-    if($choice){return $cat.Exact[$choice]}
-    return $null
+    return (Find-HydraArtworkCandidate $catalogues[$sys] $item.Name)
 }
 try {
     $items=@($requests.Systems)+@($requests.Games)
@@ -153,7 +135,7 @@ try {
     $done=0
     foreach($item in $items){
         $key=$item.Key;$dest=Join-Path $Root $item.Path
-        if($state.ContainsKey($key) -and (Asset-RetryDue $state[$key])){[void]$state.Remove($key)}
+        if($state.ContainsKey($key) -and (Test-HydraArtworkRetryDue $state[$key] $item.Name)){[void]$state.Remove($key)}
         if($state.ContainsKey($key) -and (Test-Path -LiteralPath $dest)){
             if($recover.ContainsKey($key)){
                 try{
@@ -188,7 +170,11 @@ try {
         try {
             if($item.Kind -eq 'system'){
                 $source='https://raw.githubusercontent.com/libretro/retroarch-assets/master/xmb/monochrome/png/'+[Uri]::EscapeDataString($item.Repository)+'.png'
-            }else{$source=Find-Boxart $item}
+            }else{
+                $supplemental=Get-HydraSupplementalArtwork $item.SystemId $item.Name
+                try{$source=Find-Boxart $item}catch{if(-not $supplemental){throw}}
+                if(-not $source -and $supplemental){$source=$supplemental}
+            }
             if($source){
                 $sha=[Security.Cryptography.SHA256]::Create()
                 try{$name=([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($source)))).Replace('-','').ToLowerInvariant()}finally{$sha.Dispose()}
@@ -198,7 +184,8 @@ try {
                 $status='downloaded'
             }
         }catch{$status='error';$errorText=$_.Exception.Message}
-        $state[$key]=@{Status=$status;Path=$item.Path;Source=$source;Error=$errorText;Checked=[datetime]::UtcNow.ToString('o');StyleVersion=2;TransportVersion=$script:assetTransportVersion}
+        $sourceKind=if($source -like 'https://archive3do.com/*'){'platform-screenshot'}else{'boxart'}
+        $state[$key]=@{Status=$status;Path=$item.Path;Source=$source;SourceKind=$sourceKind;Error=$errorText;Checked=[datetime]::UtcNow.ToString('o');StyleVersion=2;TransportVersion=$script:assetTransportVersion;MatchingVersion=3;MatchName=(Normalize-Title $item.Name);Reason=$(if($status -eq 'fallback'){'not-in-platform-index'}elseif($sourceKind -eq 'platform-screenshot'){'supplemental-gameplay-image'}else{''})}
         $done++;Save-State;Save-Progress 'Baixando capas e logos' $done $items.Count
     }
     Save-State -Force

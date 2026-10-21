@@ -1,6 +1,6 @@
 $ErrorActionPreference='Stop'
 $project=Split-Path $PSScriptRoot
-$setup=Join-Path $project 'dist\TarginoRetroStation-1.5.2-Setup.exe'
+$setup=Join-Path $project 'dist\TarginoRetroStation-1.5.3-Setup.exe'
 $fixture=Join-Path $project ('build\migration-'+[guid]::NewGuid().ToString('N'))
 function Make-Old([string]$root){
     $old=Join-Path $root 'TarginoLauncher'
