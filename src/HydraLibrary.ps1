@@ -1,4 +1,4 @@
-# System navigation and persistent artwork integration for TarginoRetroStation.
+﻿# System navigation and persistent artwork integration for TarginoRetroStation.
 . (Join-Path $PSScriptRoot 'HydraArtworkMatching.ps1')
 $metadataModule=Join-Path $PSScriptRoot 'HydraMetadata.ps1'
 if([IO.File]::Exists($metadataModule)){. $metadataModule}
@@ -160,7 +160,7 @@ function HydraChooseRoms {
     } finally {$dialog.Dispose()}
 }
 function HydraArtworkSummary([int]$saved,[int]$failed,[int]$notFound){
-    if($failed -gt 0 -or $notFound -gt 0){return "Artes: $saved salvas · $failed falhas · $notFound sem correspondência"}
+    if($failed -gt 0 -or $notFound -gt 0){return "Artes: $saved salvas · $failed falhas · $notFound com arte do sistema"}
     return "Artes salvas: $saved · cache local"
 }
 function HydraArtworkRetryDue($entry,[string]$name=''){
@@ -174,7 +174,7 @@ function HydraStartArtwork {
     $savedCount=0;$failedCount=0;$notFoundCount=0
     foreach($item in $items){
         $entry=if($known -and $known.PSObject.Properties[$item.Key]){$known.($item.Key)}else{$null}
-        if(-not $entry -or $entry.StyleVersion -ne 2 -or -not [IO.File]::Exists((Full $item.Path)) -or (HydraArtworkRetryDue $entry $item.Name)){$complete=$false;break}
+        if(-not $entry -or $entry.StyleVersion -ne (Get-HydraArtworkStyleVersion $entry) -or -not [IO.File]::Exists((Full $item.Path)) -or (HydraArtworkRetryDue $entry $item.Name)){$complete=$false;break}
         switch($entry.Status){'downloaded'{$savedCount++}'error'{$failedCount++}default{$notFoundCount++}}
     }
     if($complete){$script:HydraArtStatus=HydraArtworkSummary $savedCount $failedCount $notFoundCount;return}

@@ -10,5 +10,6 @@ $state=[IO.File]::ReadAllText((Join-Path $job 'status.json'))|ConvertFrom-Json
 if($p.ExitCode -ne 0 -or $state.Phase -ne 'ready'){throw $state.Message}
 . (Join-Path $job 'FrontendUpdate.ps1')
 $manifest=Read-FrontendSignedManifest (Join-Path $job 'update.json') (Join-Path $job 'UpdatePublicKey.xml')
+if($manifest.version -ne '1.5.4'){throw 'Bootstrap recebeu versao diferente da 1.5.4'}
 Assert-FrontendPackage $state.Package $manifest
 'BOOTSTRAP_PUBLIC_STABLE_DOWNLOAD_SIGNATURE_SIZE_HASH_VERIFIED_NO_INSTALLER_EXECUTED_OK version='+$manifest.version

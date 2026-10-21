@@ -1,10 +1,11 @@
-# Public presentation and help. No privileged settings or credentials here.
-$script:TarginoWelcomeVersion='1.5.3'
+﻿# Public presentation and help. No privileged settings or credentials here.
+$script:TarginoWelcomeVersion=[string](Get-Variable -Name AppVer -ValueOnly -ErrorAction SilentlyContinue)
+if(-not $script:TarginoWelcomeVersion){throw 'A apresentacao requer a versao AppVer do launcher.'}
 $script:TarginoChannelUrl='https://www.youtube.com/@targino.socialmedia'
 function TarginoWelcomeContent {
     @(
         @{Tab='Apresentação';Title='Sua biblioteca. Seu controle. Seu jeito de jogar.';Banner=$true;Body=@'
-Bem-vindo ao Targino RetroStation 1.5.3!
+Bem-vindo ao Targino RetroStation {Version}!
 
 Um complemento visual independente para organizar e iniciar os jogos da sua instalação do Hydra. Escolha o sistema, encontre o jogo e entre na diversão com teclado, mouse ou controle.
 
@@ -81,8 +82,11 @@ As opções de fontes de dados e cache estão em Personalizar e Filtros. Uma cha
 ATUALIZAR O COMPLEMENTO
 Use Filtros > Verificar atualizações do RetroStation. A consulta automática ocorre diariamente em segundo plano; você confirma antes de instalar. Só releases estáveis assinadas do repositório TarginoRetroStation são aceitas. Seus dados são preservados e os arquivos substituídos recebem backup.
 '@}
-        @{Tab='Novidades';Title='O que mudou: 1.5.2 → 1.5.3';Body=@'
-Busca de artes, renovacao do cache sem correspondencia e contadores corrigidos. PacMan de 3DO pode usar uma captura do jogo do Archive3DO como imagem alternativa. Seus jogos, BIOS e configuracoes nao sao alterados.
+        @{Tab='Novidades';Title='Novidades desta versão';Body=@'
+CAPAS E ARTES DO SISTEMA
+Correspondencia de nomes melhorada: artigos, conectores e titulos traduzidos ou regionais confirmados por plataforma. Ausencias antigas sao consultadas novamente, sem apagar capas validas.
+Quando nao houver capa confirmada, o jogo recebe uma arte neutra da propria plataforma, identificada como ARTE DO SISTEMA, nunca como capa oficial. O contador distingue downloads, falhas e artes do sistema.
+PacMan de 3DO pode usar uma captura do Archive3DO como imagem alternativa. Jogos, BIOS, saves e configuracoes sao preservados.
 
 
 INSTALADOR WEB
@@ -136,21 +140,21 @@ function TarginoWelcomeInput([string]$key,$dialog){
     }
 }
 function New-TarginoWelcomeDialog($state){
-    $dialog=New-Object Windows.Forms.Form -Property @{Text='TarginoRetroStation 1.5.3 — Apresentação e ajuda';ClientSize='1000,740';MinimumSize='850,680';StartPosition='CenterParent';BackColor=[Drawing.Color]::FromArgb(10,18,31);ForeColor=[Drawing.Color]::White;Font=(New-Object Drawing.Font('Segoe UI',11));KeyPreview=$true;MinimizeBox=$false}
+    $dialog=New-Object Windows.Forms.Form -Property @{Text=('TarginoRetroStation '+$script:TarginoWelcomeVersion+' — Apresentação e ajuda');ClientSize='1000,740';MinimumSize='850,680';StartPosition='CenterParent';BackColor=[Drawing.Color]::FromArgb(10,18,31);ForeColor=[Drawing.Color]::White;Font=(New-Object Drawing.Font('Segoe UI',11));KeyPreview=$true;MinimizeBox=$false}
     $header=New-Object Windows.Forms.Panel -Property @{Dock='Top';Height=104;BackColor=[Drawing.Color]::FromArgb(17,34,56)}
     $avatar=New-Object Windows.Forms.PictureBox -Property @{Left=16;Top=7;Width=88;Height=88;SizeMode='Zoom'}
     $owned=New-Object 'Collections.Generic.List[Drawing.Image]'
     $avatarPath=Join-Path $Arq 'Marca\avatar.png'
     if([IO.File]::Exists($avatarPath)){$source=[Drawing.Image]::FromFile($avatarPath);try{$avatar.Image=New-Object Drawing.Bitmap($source);$owned.Add($avatar.Image)}finally{$source.Dispose()}}
     $title=New-Object Windows.Forms.Label -Property @{Text='TarginoRetroStation';Left=120;Top=17;Width=650;Height=40;Font=(New-Object Drawing.Font('Segoe UI',25,[Drawing.FontStyle]::Bold));ForeColor=[Drawing.Color]::FromArgb(100,195,255)}
-    $subtitle=New-Object Windows.Forms.Label -Property @{Text='1.5.3 ESTÁVEL   •   Complemento para o Hydra   •   Por Targino.SocialMedia';Left=122;Top=64;Width=830;Height=28;Font=(New-Object Drawing.Font('Segoe UI',10))}
+    $subtitle=New-Object Windows.Forms.Label -Property @{Text=($script:TarginoWelcomeVersion+' ESTÁVEL   •   Complemento para o Hydra   •   Por Targino.SocialMedia');Left=122;Top=64;Width=830;Height=28;Font=(New-Object Drawing.Font('Segoe UI',10))}
     $header.Controls.AddRange(@($avatar,$title,$subtitle))
     $tabs=New-Object Windows.Forms.TabControl -Property @{Dock='Fill';Padding=(New-Object Drawing.Point(17,9))}
     foreach($content in @(TarginoWelcomeContent)){
         $page=New-Object Windows.Forms.TabPage -Property @{Text=$content.Tab;BackColor=[Drawing.Color]::FromArgb(13,24,40);ForeColor=[Drawing.Color]::White;Padding=(New-Object Windows.Forms.Padding(20,12,20,12))}
         $heading=New-Object Windows.Forms.Label -Property @{Text=$content.Title;Dock='Top';Height=46;AutoEllipsis=$true;Font=(New-Object Drawing.Font('Segoe UI',17,[Drawing.FontStyle]::Bold));ForeColor=[Drawing.Color]::FromArgb(121,204,255)}
         $body=New-Object Windows.Forms.Panel -Property @{Dock='Fill';AutoScroll=$true;TabStop=$true;BackColor=$page.BackColor}
-        $paragraph=New-Object Windows.Forms.Label -Property @{Text=$content.Body;AutoSize=$true;MaximumSize=(New-Object Drawing.Size(900,0));ForeColor=[Drawing.Color]::FromArgb(225,234,245);Font=(New-Object Drawing.Font('Segoe UI',11));UseMnemonic=$false}
+        $paragraph=New-Object Windows.Forms.Label -Property @{Text=$content.Body.Replace('{Version}',$script:TarginoWelcomeVersion);AutoSize=$true;MaximumSize=(New-Object Drawing.Size(900,0));ForeColor=[Drawing.Color]::FromArgb(225,234,245);Font=(New-Object Drawing.Font('Segoe UI',11));UseMnemonic=$false}
         $body.Controls.Add($paragraph);$body.Tag=@{Text=$paragraph}
         $body.Add_SizeChanged({param($sender,$eventArgs) $sender.Tag.Text.MaximumSize=New-Object Drawing.Size(([Math]::Max(200,$sender.ClientSize.Width-24)),0)})
         $page.Controls.Add($body)

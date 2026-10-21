@@ -1,4 +1,4 @@
-$ErrorActionPreference='Stop'
+﻿$ErrorActionPreference='Stop'
 $project=Split-Path $PSScriptRoot
 . (Join-Path $project 'src\HydraArtworkMatching.ps1')
 $url='https://example.invalid/3do/'
@@ -9,7 +9,7 @@ foreach($name in @('PacMan (US)','Pac Man (USA)','PAC-MAN','Pac Man (US) — Tel
 if(Find-HydraArtworkCandidate $cat 'Street Fighter'){throw 'Outra sequencia atribuida por prefixo'}
 if(Find-HydraArtworkCandidate $cat 'Game'){throw 'Beta usado como jogo final'}
 $bad=$false;try{[void](ConvertTo-HydraArtworkCatalogue '<html>Service unavailable</html>' $url)}catch{$bad=$true};if(-not $bad){throw 'HTML invalido tratado como jogo ausente'}
-$entry=[pscustomobject]@{Status='fallback';MatchingVersion=3;MatchName='pacman';Checked=[datetime]::UtcNow.ToString('o')}
+$entry=[pscustomobject]@{Status='fallback';MatchingVersion=4;MatchName='pacman';Checked=[datetime]::UtcNow.ToString('o')}
 if(Test-HydraArtworkRetryDue $entry 'Pac Man (US)'){throw 'Cache negativo recente nao respeitado'}
 $entry.Checked=[datetime]::UtcNow.AddDays(-2).ToString('o')
 if(-not (Test-HydraArtworkRetryDue $entry 'PacMan')){throw 'Cache negativo continua permanente'}

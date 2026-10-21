@@ -1,7 +1,7 @@
-param()
+﻿param()
 $ErrorActionPreference='Stop'
 $project=Split-Path $PSScriptRoot
-$version='1.5.3'
+$version='1.5.4'
 $out=Join-Path $project 'dist'
 $stage=Join-Path $project ('build\'+[guid]::NewGuid().ToString('N'))
 $addon=Join-Path $stage 'TarginoRetroStation'

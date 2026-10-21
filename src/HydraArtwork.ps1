@@ -1,4 +1,4 @@
-param([string]$Root='D:\Games\hydra', [switch]$PrepareOnly)
+﻿param([string]$Root='D:\Games\hydra', [switch]$PrepareOnly)
 $ErrorActionPreference='Stop'
 Add-Type -AssemblyName System.Drawing
 . (Join-Path $PSScriptRoot 'HydraArtworkMatching.ps1')
@@ -55,6 +55,16 @@ function Normalize-Title([string]$name){
     Normalize-HydraArtworkTitle $name
 }
 function Write-Card($item,[string]$imagePath,[bool]$official){
+    $neutral=(-not $official -and $item.Kind -eq 'game')
+    if($neutral -and -not $imagePath){
+        $platform=$state[('system:'+$item.SystemId)]
+        if($platform -and $platform.Source){
+            $sha=[Security.Cryptography.SHA256]::Create()
+            try{$iconHash=([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($platform.Source)))).Replace('-','').ToLowerInvariant()}finally{$sha.Dispose()}
+            $icon=Join-Path $media ('Originais\'+$iconHash+'.png')
+            if([IO.File]::Exists($icon)){$imagePath=$icon}
+        }
+    }
     $dest=Join-Path $Root $item.Path
     $bitmap=New-Object Drawing.Bitmap(480,680)
     $g=[Drawing.Graphics]::FromImage($bitmap)
@@ -73,17 +83,21 @@ function Write-Card($item,[string]$imagePath,[bool]$official){
         # Titles and system labels belong to the UI, not baked into artwork.
         if($imagePath -and (Test-Path -LiteralPath $imagePath)){
             $image=[Drawing.Image]::FromFile($imagePath)
-            $target=if($item.Kind -eq 'system'){New-Object Drawing.RectangleF(50,80,380,520)}else{New-Object Drawing.RectangleF(12,16,456,648)}
+            $target=if($neutral){New-Object Drawing.RectangleF(70,130,340,250)}elseif($item.Kind -eq 'system'){New-Object Drawing.RectangleF(50,80,380,520)}else{New-Object Drawing.RectangleF(12,16,456,648)}
             $scale=[Math]::Min($target.Width/$image.Width,$target.Height/$image.Height)
             $w=[single]($image.Width*$scale);$h=[single]($image.Height*$scale)
             $g.DrawImage($image,([single]($target.X+($target.Width-$w)/2)),([single]($target.Y+($target.Height-$h)/2)),$w,$h)
         } else {
             $pen=New-Object Drawing.Pen($color,4)
             $g.DrawEllipse($pen,145,160,190,190)
-            $initial=if($item.Kind -eq 'system'){$item.SystemId.ToUpperInvariant()}else{'ROM'}
+            $initial=$item.SystemId.ToUpperInvariant()
             $g.DrawString($initial,$font,$textBrush,(New-Object Drawing.RectangleF(130,180,220,150)),$format)
         }
-        if(-not $official){$g.DrawString('ARTE INDISPONIVEL',$small,$muted,(New-Object Drawing.RectangleF(30,580,420,40)),$format)}
+        if($neutral){
+            $label=if($item.SystemName){$item.SystemName}else{$item.SystemId.ToUpperInvariant()}
+            $g.DrawString($label,$font,$textBrush,(New-Object Drawing.RectangleF(25,410,430,110)),$format)
+            $g.DrawString('ARTE DO SISTEMA',$small,$muted,(New-Object Drawing.RectangleF(30,580,420,40)),$format)
+        }elseif(-not $official){$g.DrawString('ARTE INDISPONIVEL',$small,$muted,(New-Object Drawing.RectangleF(30,580,420,40)),$format)}
         $tmp=$dest+'.tmp';$bitmap.Save($tmp,[Drawing.Imaging.ImageFormat]::Png)
         [IO.File]::Copy($tmp,$dest,$true);[IO.File]::Delete($tmp)
     } finally {
@@ -110,7 +124,7 @@ function Find-Boxart($item){
         }
         $catalogues[$sys]=ConvertTo-HydraArtworkCatalogue ([IO.File]::ReadAllText($indexFile)) $url
     }
-    return (Find-HydraArtworkCandidate $catalogues[$sys] $item.Name)
+    return (Find-HydraArtworkCandidate $catalogues[$sys] $item.Name $sys)
 }
 try {
     $items=@($requests.Systems)+@($requests.Games)
@@ -152,7 +166,8 @@ try {
                 }
                 Save-State
             }
-            if($state[$key].StyleVersion -ne 2){
+            $expectedStyle=Get-HydraArtworkStyleVersion $state[$key]
+            if($state[$key].StyleVersion -ne $expectedStyle){
                 $cached=''
                 if($state[$key].Source){
                     $sha=[Security.Cryptography.SHA256]::Create()
@@ -161,7 +176,7 @@ try {
                     if(Test-Path -LiteralPath $candidate){$cached=$candidate}
                 }
                 Write-Card $item $cached ([bool]$cached)
-                $state[$key] | Add-Member NoteProperty StyleVersion 2 -Force
+                $state[$key] | Add-Member NoteProperty StyleVersion $expectedStyle -Force
                 Save-State
             }
             $done++;continue
@@ -184,8 +199,9 @@ try {
                 $status='downloaded'
             }
         }catch{$status='error';$errorText=$_.Exception.Message}
-        $sourceKind=if($source -like 'https://archive3do.com/*'){'platform-screenshot'}else{'boxart'}
-        $state[$key]=@{Status=$status;Path=$item.Path;Source=$source;SourceKind=$sourceKind;Error=$errorText;Checked=[datetime]::UtcNow.ToString('o');StyleVersion=2;TransportVersion=$script:assetTransportVersion;MatchingVersion=3;MatchName=(Normalize-Title $item.Name);Reason=$(if($status -eq 'fallback'){'not-in-platform-index'}elseif($sourceKind -eq 'platform-screenshot'){'supplemental-gameplay-image'}else{''})}
+        if($status -ne 'downloaded'){Write-Card $item '' $false}
+        $sourceKind=if($status -ne 'downloaded' -and $item.Kind -eq 'game'){'platform-neutral'}elseif($source -like 'https://archive3do.com/*'){'platform-screenshot'}else{'boxart'}
+        $state[$key]=@{Status=$status;Path=$item.Path;Source=$source;SourceKind=$sourceKind;Error=$errorText;Checked=[datetime]::UtcNow.ToString('o');StyleVersion=$(if($status -eq 'downloaded'){2}else{3});TransportVersion=$script:assetTransportVersion;MatchingVersion=4;MatchName=(Normalize-Title $item.Name);Reason=$(if($status -eq 'fallback'){'not-in-platform-index'}elseif($sourceKind -eq 'platform-screenshot'){'supplemental-gameplay-image'}else{''})}
         $done++;Save-State;Save-Progress 'Baixando capas e logos' $done $items.Count
     }
     Save-State -Force
