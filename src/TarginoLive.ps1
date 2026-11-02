@@ -20,7 +20,7 @@ function HydraLiveTick($entry){
         HydraLiveFlush $entry
         if($entry.ReturnRequested){return}
         $handle=$entry.Proc.MainWindowHandle
-        if($handle -eq [IntPtr]::Zero){return}
+        if($null -eq $handle -or $handle -eq [IntPtr]::Zero){return}      # janela ja fechou: evita o erro "converter nulo para IntPtr"
         if($entry.LiveHandle -ne $handle -or $entry.LiveRevision -ne $script:HydraLiveRevision){$entry.LiveHandle=$handle;$entry.LiveRevision=$script:HydraLiveRevision;$entry.LiveAttempts=0;$entry.LiveStatus='';$entry.LiveInitialized=$false}
         if($script:HydraLivePrefs.AutoRemember){
             if(-not [TarginoLiveWindow]::StartWatching($handle,$entry.Proc.Id) -and -not $entry.LiveWatchError){Log 'AVISO' 'Windows nao permitiu observar o ajuste manual da janela do Hydra.';$entry.LiveWatchError=$true}

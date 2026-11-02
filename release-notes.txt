@@ -1,0 +1,1 @@
+﻿Targino RetroStation v1.5.13: Adicionado novo Tema Moderno com vitrine dinamica de consoles e capas, seletor de temas (Classico/Moderno), suporte a tela cheia F11 responsivo e personalizacao direta de avatar e plano de fundo.

@@ -1,6 +1,7 @@
 ﻿param([string]$Root='D:\Games\hydra', [switch]$PrepareOnly)
 $ErrorActionPreference='Stop'
 Add-Type -AssemblyName System.Drawing
+. (Join-Path $PSScriptRoot 'Hashing.ps1')
 . (Join-Path $PSScriptRoot 'HydraArtworkMatching.ps1')
 $metadataModule=Join-Path $PSScriptRoot 'HydraMetadata.ps1'
 if([IO.File]::Exists($metadataModule)){. $metadataModule}
@@ -23,6 +24,19 @@ if(Test-Path -LiteralPath $indexPath){
     $stream=[IO.File]::Open($indexPath,[IO.FileMode]::Open,[IO.FileAccess]::Read,([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
     try{$reader=New-Object IO.StreamReader($stream,[Text.Encoding]::UTF8,$true);try{$old=$reader.ReadToEnd() | ConvertFrom-Json}finally{$reader.Dispose()}}finally{$stream.Dispose()}
     foreach($p in $old.PSObject.Properties){$state[$p.Name]=$p.Value}
+}
+# Aliases extras do usuario: se o arquivo mudou desde a ultima execucao, os jogos sem capa
+# (fallback) sao consultados de novo uma vez. Capas ja baixadas nao sao tocadas.
+$aliasFile=Join-Path $data 'hydra-capas-aliases.json'
+[void](Import-HydraArtworkUserAliases $aliasFile)
+$aliasHash=if([IO.File]::Exists($aliasFile)){Get-TarginoFileSHA256 $aliasFile}else{''}
+$previousAliases=$state['meta:aliases']
+if(([string]$previousAliases.Hash) -cne $aliasHash){
+    foreach($stateKey in @($state.Keys)){
+        $stateEntry=$state[$stateKey]
+        if($stateEntry -and $stateEntry.Status -eq 'fallback'){[void]$state.Remove($stateKey)}
+    }
+    $state['meta:aliases']=@{Status='meta';Hash=$aliasHash;Checked=[datetime]::UtcNow.ToString('o')}
 }
 function Save-State([switch]$Force) {
     if(-not $Force -and $script:stateWriteClock.ElapsedMilliseconds -lt 500){return}
@@ -59,8 +73,7 @@ function Write-Card($item,[string]$imagePath,[bool]$official){
     if($neutral -and -not $imagePath){
         $platform=$state[('system:'+$item.SystemId)]
         if($platform -and $platform.Source){
-            $sha=[Security.Cryptography.SHA256]::Create()
-            try{$iconHash=([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($platform.Source)))).Replace('-','').ToLowerInvariant()}finally{$sha.Dispose()}
+            $iconHash=Get-TarginoStringSHA256 ($platform.Source)
             $icon=Join-Path $media ('Originais\'+$iconHash+'.png')
             if([IO.File]::Exists($icon)){$imagePath=$icon}
         }
@@ -135,8 +148,7 @@ try {
         if(-not(Test-Path -LiteralPath $dest)){
             $original='';$entry=$state[$item.Key]
             if($entry -and $entry.Source){
-                $sha=[Security.Cryptography.SHA256]::Create()
-                try{$hash=([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($entry.Source)))).Replace('-','').ToLowerInvariant()}finally{$sha.Dispose()}
+                $hash=Get-TarginoStringSHA256 ($entry.Source)
                 $candidate=Join-Path $media ('Originais\'+$hash+'.png')
                 if(Test-Path -LiteralPath $candidate){$original=$candidate}
             }
@@ -153,8 +165,7 @@ try {
         if($state.ContainsKey($key) -and (Test-Path -LiteralPath $dest)){
             if($recover.ContainsKey($key)){
                 try{
-                    $sha=[Security.Cryptography.SHA256]::Create()
-                    try{$hash=([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($recover[$key])))).Replace('-','').ToLowerInvariant()}finally{$sha.Dispose()}
+                    $hash=Get-TarginoStringSHA256 ($recover[$key])
                     $recovered=Join-Path $media ('Originais\'+$hash+'.png')
                     Get-Asset $recover[$key] $recovered
                     Write-Card $item $recovered $true
@@ -170,8 +181,7 @@ try {
             if($state[$key].StyleVersion -ne $expectedStyle){
                 $cached=''
                 if($state[$key].Source){
-                    $sha=[Security.Cryptography.SHA256]::Create()
-                    try{$hash=([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($state[$key].Source)))).Replace('-','').ToLowerInvariant()}finally{$sha.Dispose()}
+                    $hash=Get-TarginoStringSHA256 ($state[$key].Source)
                     $candidate=Join-Path $media ('Originais\'+$hash+'.png')
                     if(Test-Path -LiteralPath $candidate){$cached=$candidate}
                 }
@@ -191,8 +201,7 @@ try {
                 if(-not $source -and $supplemental){$source=$supplemental}
             }
             if($source){
-                $sha=[Security.Cryptography.SHA256]::Create()
-                try{$name=([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($source)))).Replace('-','').ToLowerInvariant()}finally{$sha.Dispose()}
+                $name=Get-TarginoStringSHA256 ($source)
                 $original=Join-Path $media ('Originais\'+$name+'.png')
                 Get-Asset $source $original
                 Write-Card $item $original $true

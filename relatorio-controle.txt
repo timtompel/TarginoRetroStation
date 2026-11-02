@@ -1,0 +1,29 @@
+﻿=== Verificador de compatibilidade com DualSense ===
+Pasta: D:\Games\RECOMPILADOS PARA PC\Targino Launcher\Biblioteca\black-xbox
+
+[1] Controle conectado no PC
+    Nenhum controle Sony detectado (conecte por USB e rode de novo se quiser).
+
+[2] Executaveis e DLLs analisados
+    Total analisado: 591 arquivos
+    Arquivos com referencias a controle:
+    black.log  ->  XInputGetState
+    blackrt.dll  ->  XInputGetState
+    README.md  ->  xemu, Cxbx
+    game\levels\global\Speech.bks  ->  Cxbx
+    game\levels\level_01\Unit_01.bin  ->  Cxbx
+    game\levels\level_05\Unit_05.bin  ->  Cxbx
+
+[3] Arquivos auxiliares relacionados a controle
+    Nenhum encontrado.
+
+[4] Veredito
+    PROVAVELMENTE FUNCIONA: usa SDL ou e um emulador (que costuma ler DualSense).
+    Se for emulador, configure o controle nas opcoes de entrada dele.
+
+Resumo das APIs encontradas:
+    XInput      : XInputGetState
+    DirectInput : -
+    SDL         : -
+    HID/Nativo  : -
+    Emulador    : xemu, Cxbx

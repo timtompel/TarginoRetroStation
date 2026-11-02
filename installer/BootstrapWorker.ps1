@@ -12,13 +12,9 @@ try{
     Clear-RetroStationUpdateCache (Split-Path $Job)
     $cancel=Join-Path $Job 'cancel'
     Set-BootstrapStatus 'download' 'Consultando a versao estavel...'
-    $api=Join-Path $Job 'release.json'
-    Receive-FrontendFile 'https://api.github.com/repos/timtompel/TarginoRetroStation/releases/latest' $api 1MB $null $cancel
-    $release=Get-FrontendStableRelease ([IO.File]::ReadAllText($api)|ConvertFrom-Json)
     $envelope=Join-Path $Job 'update.json'
-    Receive-FrontendFile $release.manifestUrl $envelope 65536 $null $cancel
+    Receive-FrontendFile 'https://github.com/timtompel/TarginoRetroStation/releases/latest/download/update.json' $envelope 65536 $null $cancel
     $manifest=Read-FrontendSignedManifest $envelope (Join-Path $PSScriptRoot 'UpdatePublicKey.xml')
-    if($manifest.version -cne $release.version){throw 'Versao do manifesto nao corresponde a release.'}
     $package=Join-Path $Job $manifest.fileName
     Receive-FrontendFile $manifest.url $package 512MB {
         param($received,$total)

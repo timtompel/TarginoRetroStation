@@ -1,5 +1,4 @@
 ﻿// Native-code-profile-gated direct launch adapter. Only our new process is modified.
-// No native executable, core, ROM or emulator configuration is edited on disk.
 using System;
 using System.IO;
 using System.Text;
@@ -12,7 +11,7 @@ using System.Collections.Generic;
 using System.Web.Script.Serialization;
 public static class HydraDirectBridge {
     public const string SupportedHash="5C29156BB7907FD793E29923E30A73663BA7C30729AF88228D041C4A91A49BAA";
-    public const string AdapterVersion="1.4.0-rc2";
+    public const string AdapterVersion="1.5.18-ogl";
     const string SupportedCodeHash="0DE3F8DC41015CBECAF429CD378C5A0D553DBFA9B4C7C7CA2EC4CB2C3550F95E";
     const string OfficialCodeHash="C7CC95ED017F2F42FF9E0DCEBF9B93E3A0EA55FD494472203335A409E40EFD48";
     public sealed class Patch {public uint Rva;public byte[] Before,After;public bool Code;}
@@ -35,8 +34,6 @@ public static class HydraDirectBridge {
     static readonly JavaScriptSerializer Json=new JavaScriptSerializer();
     static string Hash(byte[] data){using(var sha=SHA256.Create())return BitConverter.ToString(sha.ComputeHash(data)).Replace("-","");}
     public static bool IsSupported(string exe){try{LocateStartup(File.ReadAllBytes(exe));return true;}catch{return false;}}
-    // Read-only observation of the known native profile. A loaded DLL is not
-    // evidence of a loaded game: PS2 can retain its library after retro_unload_game.
     public sealed class ReturnObserver {
         readonly Process process; readonly long imageBase; long application;
         [StructLayout(LayoutKind.Sequential)] struct ThreadBasic {
@@ -47,7 +44,6 @@ public static class HydraDirectBridge {
         public ReturnObserver(Process process,string exe){
             LocateStartup(File.ReadAllBytes(exe));this.process=process;
             imageBase=process.MainModule.BaseAddress.ToInt64();
-            // This stack anchor is specific to the two whole-code-hash profiles.
             byte[] anchor=Read(imageBase+0x427e,5);
             if(anchor==null||anchor[0]!=0xe8||BitConverter.ToInt32(anchor,1)!=0xd82d)throw new Exception("Perfil de retorno nativo desconhecido.");
         }
@@ -70,7 +66,6 @@ public static class HydraDirectBridge {
                     for(int n=0;n<=count-0xa00;n+=8){
                         if(BitConverter.ToInt64(stack,n)!=imageBase+0x4283)continue;
                         long candidate=top-count+n+0x30;
-                        // Main's App object must contain a parsed --boot system and ROM.
                         long systemLength=Pointer(candidate+0x870),romLength=Pointer(candidate+0x890);
                         if(systemLength<1||systemLength>32||romLength<1||romLength>32767)continue;
                         if(application!=0&&application!=candidate)return false;
@@ -80,7 +75,6 @@ public static class HydraDirectBridge {
             }
             return application!=0;
         }
-        // -1 = unknown (never close on it), 0 = no game, 1 = loaded game.
         public int ReadGameState(){
             try{
                 if(application==0&&!LocateApplication())return -1;
@@ -98,7 +92,7 @@ public static class HydraDirectBridge {
         }
     }
     public static string GetCompatibilityReason(string exe,string system){
-        try{Prepare(exe,system,system=="ps2"?"opengl":"aes");return "";}catch(Exception error){return error.Message;}
+        try{Prepare(exe,system,system=="neogeo"?"aes":"opengl");return "";}catch(Exception error){return error.Message;}
     }
     static int SectionTable(byte[] data,out int count){
         if(data.Length<256||data[0]!=77||data[1]!=90)throw new Exception("Executavel Hydra invalido.");
@@ -118,8 +112,6 @@ public static class HydraDirectBridge {
         uint raw=BitConverter.ToUInt32(data,foundSection+20),size=BitConverter.ToUInt32(data,foundSection+16);
         if((BitConverter.ToUInt32(data,foundSection+36)&0x20000000)==0||raw>data.Length||size>data.Length-raw||size<22)throw new Exception("Secao de codigo invalida.");
         byte[] code=new byte[(int)size];Buffer.BlockCopy(data,(int)raw,code,0,code.Length);
-        // Whole-file changes to timestamps, icons, resources or signatures are not ABI changes.
-        // Unknown executable CODE is still rejected; a short byte pattern alone is insufficient.
         string codeHash=Hash(code);
         if(codeHash!=SupportedCodeHash&&codeHash!=OfficialCodeHash)throw new Exception("O codigo nativo desta compilacao ainda nao corresponde a um perfil de abertura direta validado.");
         byte[] signature={0xc6,0x87,0x49,0x09,0,0,1,0xc6,0x87,0x93,0x09,0,0,1,0x48,0x83,0xbf,0x70,0x08,0,0,0};
@@ -161,12 +153,7 @@ public static class HydraDirectBridge {
     }
     public static Plan Prepare(string exe,string system,string choice){
         if(IntPtr.Size!=8)throw new Exception("A abertura direta requer o launcher de 64 bits.");
-        if(system!="ps2"&&system!="neogeo")throw new ArgumentException("Sistema nao suportado pelo adaptador direto.");
-        string renderer=null;
-        if(system=="ps2"){
-            renderer=choice=="software"?"Software (HW)":choice=="hardware"||choice=="vulkan"?"Vulkan":choice=="opengl"?"OpenGL":null;
-            if(renderer==null)throw new ArgumentException("Renderizador invalido.");
-        }else if(choice!="aes"&&choice!="mvs")throw new ArgumentException("Modo Neo Geo invalido.");
+        if(system!="ps2"&&system!="neogeo"&&system!="n64"&&system!="gamecube"&&system!="dreamcast")throw new ArgumentException("Sistema nao suportado pelo adaptador direto.");
         byte[] data=File.ReadAllBytes(exe);
         uint startupRva=LocateStartup(data);
         Match manifest=null;
@@ -178,23 +165,48 @@ public static class HydraDirectBridge {
         if(manifest==null)throw new Exception("Manifesto do sistema nao encontrado.");
         byte[] before=new byte[manifest.Length];Buffer.BlockCopy(data,manifest.Index,before,0,before.Length);
         var parsed=Json.Deserialize<Dictionary<string,object>>(Encoding.UTF8.GetString(before));
-        string expectedLibrary=system=="ps2"?"pcsx2_libretro.dll":"geolith_libretro.dll";
-        string expectedPrefix=system=="ps2"?"pcsx2":"geolith";
-        if(!parsed.ContainsKey("library")||!parsed.ContainsKey("libretro")||!parsed.ContainsKey("backend")||
-            (string)parsed["library"]!=expectedLibrary||(string)parsed["libretro"]!=expectedPrefix||(string)parsed["backend"]!="core")throw new Exception("Estrutura do core diferente da estrutura validada.");
-        var defaults=parsed["defaults"] as Dictionary<string,object>;
+        var defaults=parsed.ContainsKey("defaults") ? (parsed["defaults"] as Dictionary<string,object>) : null;
         if(defaults==null)throw new Exception("Padroes de core invalidos.");
-        if(system=="ps2"){
+        if(system=="gamecube"){
+            defaults["renderer"]="Hardware";
+            defaults["skip_gc_bios"]="enabled";
+            defaults["shader_compilation_mode"]="0";
+            defaults["fastmem"]="disabled";
+            if(parsed.ContainsKey("core_options_hide")) parsed["core_options_hide"]=new string[0];
+            parsed["requires"]=""; // Forca o Hydra a abrir em contexto OpenGL
+        } else if(system=="ps2"){
+            string renderer=choice=="software"?"Software (HW)":choice=="opengl"?"OpenGL":"Vulkan";
             defaults["renderer"]=renderer;
-            // OpenGL/software must not depend on Vulkan availability. The real Vulkan
-            // probe is kept intact for Vulkan and for every other native system.
+            if(choice!="vulkan"&&choice!="hardware")parsed["requires"]="";
+        } else if(system=="n64"){
+            if(choice=="software"){
+                defaults["gfx_plugin"]="angrylion";
+                defaults["rsp_plugin"]="cxd4";
+                defaults["rdp_plugin"]="angrylion";
+                parsed["requires"]="";
+            } else if(choice=="opengl"){
+                defaults["gfx_plugin"]="gliden64";
+                defaults["rsp_plugin"]="hle";
+                defaults["rdp_plugin"]="gliden64";
+                parsed["requires"]="";
+            } else if(choice=="vulkan"||choice=="hardware"){
+                defaults["gfx_plugin"]="parallel";
+                defaults["rsp_plugin"]="parallel";
+                defaults["rdp_plugin"]="parallel";
+            } else throw new ArgumentException("Renderizador N64 invalido.");
+        } else if(system=="dreamcast"){
             if(choice!="hardware"&&choice!="vulkan")parsed["requires"]="";
+        } else {
+            if(choice!="aes"&&choice!="mvs")throw new ArgumentException("Modo Neo Geo invalido.");
+            defaults["system_type"]=choice;defaults["unibios_hw"]=choice;
         }
-        else {defaults["system_type"]=choice;defaults["unibios_hw"]=choice;}
         byte[] compact=Encoding.UTF8.GetBytes(Json.Serialize(parsed));
+        if(compact.Length>before.Length && parsed.ContainsKey("core_options_hide")){
+            parsed["core_options_hide"]=new string[0];
+            compact=Encoding.UTF8.GetBytes(Json.Serialize(parsed));
+        }
         if(compact.Length>before.Length)throw new Exception("Nao ha espaco reservado para as opcoes do core.");
         byte[] after=new byte[before.Length];for(int i=0;i<after.Length;i++)after[i]=32;Buffer.BlockCopy(compact,0,after,0,compact.Length);
-        // Parse it again before creating a process; also validates UTF-8 and JSON padding.
         Json.DeserializeObject(Encoding.UTF8.GetString(after));
         return new Plan{System=system,Choice=choice,Patches=new Patch[]{
             new Patch{Rva=ToRva(data,manifest.Index),Before=before,After=after,Code=false},
@@ -229,7 +241,6 @@ public static class HydraDirectBridge {
             Require(ReadProcessMemory(info.process,IntPtr.Add(basic.peb,0x10),image,(UIntPtr)8,out done)&&done.ToUInt64()==8,"Ler endereco da imagem Hydra");
             foreach(var patch in plan.Patches)Apply(info.process,BitConverter.ToInt64(image,0),patch);
             native=Process.GetProcessById((int)info.pid);
-            // Hold a process handle before ResumeThread, including for immediate-load failures.
             IntPtr keepAlive=native.Handle;
             if(ResumeThread(info.thread)==0xffffffff)throw new Win32Exception(Marshal.GetLastWin32Error());
             resumed=true;return native;

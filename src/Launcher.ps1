@@ -1,5 +1,5 @@
 ﻿Add-Type -AssemblyName System.Windows.Forms, System.Drawing
-$AppVer = '1.5.4'
+$AppVer = '1.5.19'
 $script:T0 = [Diagnostics.Stopwatch]::StartNew()      # tempo de abertura (vai para o log e para o diagnóstico)
 # O Launcher.ps1 fica em TarginoRetroStation\; a pasta do launcher ($Root) é a de cima (onde ficam só o executável e Jogos\).
 #  Tudo é relativo a $Root: a pasta pode ser copiada para outro HD ou renomeada.
@@ -11,6 +11,34 @@ if(-not [IO.File]::Exists((Join-Path $Root 'hydra.exe')) -and [IO.File]::Exists(
     . $hydraHelpModule
     if(-not (Show-HydraInstallHelp $Root)){return}
 }
+# ---- Tela de abertura imediata (v1.5.6): aparece em ~1 s; a "Carregando jogos" assume o lugar dela sem piscar ----
+$script:EarlySplash = $null
+function EarlySplashOpen {
+    try {
+        $bg = [Drawing.ColorTranslator]::FromHtml('#0B0B0B')
+        $f = New-Object Windows.Forms.Form -Property @{ FormBorderStyle = 'None'; StartPosition = 'CenterScreen'; Size = '440,128'; BackColor = $bg; ShowInTaskbar = $false; ShowIcon = $false; TopMost = $true; Text = 'Targino RetroStation' }
+        $t = New-Object Windows.Forms.Label -Property @{ Left = 24; Top = 20; Width = 392; Height = 30; ForeColor = [Drawing.Color]::White; BackColor = $bg; Text = 'Targino RetroStation'; Font = (New-Object Drawing.Font('Segoe UI', 14)) }
+        $l = New-Object Windows.Forms.Label -Property @{ Left = 24; Top = 56; Width = 392; Height = 20; ForeColor = [Drawing.ColorTranslator]::FromHtml('#9A9A9A'); BackColor = $bg; Text = 'Iniciando...'; Font = (New-Object Drawing.Font('Segoe UI', 9)) }
+        $f.Controls.AddRange(@($t, $l))
+        $f.Show(); $f.Refresh()
+        # rede de seguranca: se por algum motivo ela ficar aberta, fecha sozinha depois de 90 s
+        $tm = New-Object Windows.Forms.Timer -Property @{ Interval = 90000 }
+        $tm.Add_Tick({ EarlySplashClose })
+        $tm.Start()
+        $script:EarlySplash = @{ Form = $f; L = $l; Timer = $tm }
+        [Windows.Forms.Application]::DoEvents()
+    } catch { $script:EarlySplash = $null }
+}
+function EarlySplashSet([string]$text) {      # troca o texto e deixa o Windows atualizar a janelinha (evita "Nao esta respondendo")
+    $e = $script:EarlySplash; if (-not $e) { return }
+    try { $e.L.Text = $text; $e.Form.Refresh(); [Windows.Forms.Application]::DoEvents() } catch { }
+}
+function EarlySplashClose {
+    $e = $script:EarlySplash; $script:EarlySplash = $null
+    if ($e) { try { $e.Timer.Stop(); $e.Timer.Dispose(); $e.Form.Close(); $e.Form.Dispose() } catch { } }
+}
+function Mark([string]$name) { try { Log 'INFO' "Marco: $name (a $($script:T0.ElapsedMilliseconds) ms do inicio)" } catch { } }      # tempos por etapa, para o log mostrar onde a abertura demora
+# EarlySplashOpen   # DESLIGADA na 1.5.13 (teste): suspeita de interferir no ciclo de vida da janela principal. EarlySplashSet/Close ficam inertes sem ela.
 function ArqDir($nm) { [IO.Path]::Combine($Arq, $nm) }
 # Executável do launcher na raiz. Pode ter sido renomeado (ex.: "TarginoRetroStation - WinPort.exe"), então vale:
 #  Launcher.exe, se existir; senão o .exe da raiz cujo nome original (OriginalFilename) é Launcher.exe. Vazio = não achou.
@@ -200,20 +228,30 @@ if ($HydraLibraryConfig -and $HydraLibraryConfig.RomsPath -and [IO.Directory]::E
 $HydraCores = Join-Path $HydraRoot 'cores'
 $HydraExe = Join-Path $HydraRoot 'hydra.exe'
 $HydraManifests = @()
+EarlySplashSet 'Lendo o Hydra...'
 if ([IO.File]::Exists($HydraExe)) {
+    $swMan = [Diagnostics.Stopwatch]::StartNew()
     $manifestText = [Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes($HydraExe))
     foreach ($match in [regex]::Matches($manifestText, '(?s)\{\s*"manifest_version"[^\x00]+')) {
         try { $HydraManifests += ($match.Value | ConvertFrom-Json -ErrorAction Stop) } catch { }
     }
     $manifestText = $null
+    Log 'INFO' "Hydra: $($HydraManifests.Count) manifesto(s) lidos em $($swMan.ElapsedMilliseconds) ms"
 }
+$script:HydraRelBaseCache = @{}
 function HydraRel([string]$base,[string]$path) {
+    # Caminho rapido (sem objetos Uri): o caso normal, arquivo dentro da pasta base. Se nao der, usa o metodo antigo.
+    $bb = $script:HydraRelBaseCache[$base]
+    if ($null -eq $bb) { $bb = ([IO.Path]::GetFullPath($base)).TrimEnd('\') + '\'; $script:HydraRelBaseCache[$base] = $bb }
+    $full = [IO.Path]::GetFullPath($path)
+    if ($full.Length -gt $bb.Length -and $full.IndexOf('%') -lt 0 -and $full.StartsWith($bb, [StringComparison]::OrdinalIgnoreCase)) { return $full.Substring($bb.Length) }
     $b = New-Object Uri(([IO.Path]::GetFullPath($base)).TrimEnd('\') + '\')
     $p = New-Object Uri([IO.Path]::GetFullPath($path))
     [Uri]::UnescapeDataString($b.MakeRelativeUri($p).ToString()).Replace('/','\')
 }
 if ([IO.Directory]::Exists($HydraRoms) -and [IO.Directory]::Exists($HydraCores) -and [IO.File]::Exists($HydraExe)) {
-    $HydraGames = @(); $HydraIds = @{}
+    $HydraGames = @(); $HydraIds = @{}; $hn = 0; $swScan = [Diagnostics.Stopwatch]::StartNew(); $swEnum = New-Object Diagnostics.Stopwatch
+    EarlySplashSet 'Lendo os jogos...'
     foreach ($manifest in $HydraManifests) {
         $systemFolder = Split-Path ($manifest.directories.games.Replace('/','\')) -Leaf
         $systemPath = Join-Path $HydraRoms $systemFolder
@@ -226,8 +264,18 @@ if ([IO.Directory]::Exists($HydraRoms) -and [IO.Directory]::Exists($HydraCores) 
         $hc = Get-Item -LiteralPath $corePath -ErrorAction SilentlyContinue
         if (-not $hc) { continue }
         $HydraExts = @($manifest.extensions | ForEach-Object { '.' + $_.ToLowerInvariant() })
-        foreach ($hr in Get-ChildItem $hs.FullName -Recurse -File -ErrorAction SilentlyContinue) {
+        # Listagem rapida das ROMs (so cria o objeto de arquivo das extensoes do sistema). Se der qualquer erro, usa o Get-ChildItem de antes.
+        $swEnum.Start(); $romFiles = $null
+        try {
+            $romFiles = @(foreach ($fp in [IO.Directory]::EnumerateFiles($hs.FullName, '*', [IO.SearchOption]::AllDirectories)) {
+                if ($HydraExts -contains [IO.Path]::GetExtension($fp).ToLowerInvariant()) { $fi = [IO.FileInfo]::new($fp); if (-not ($fi.Attributes -band ([IO.FileAttributes]::Hidden -bor [IO.FileAttributes]::System))) { $fi } }
+            })
+        } catch { $romFiles = $null }
+        if ($null -eq $romFiles) { $romFiles = Get-ChildItem $hs.FullName -Recurse -File -ErrorAction SilentlyContinue }
+        $swEnum.Stop()
+        foreach ($hr in $romFiles) {
             if ($HydraExts -notcontains $hr.Extension.ToLowerInvariant()) { continue }
+            $hn++; if ($hn % 100 -eq 0) { EarlySplashSet "Lendo os jogos... ($hn)" }
             $hid = ((HydraRel $HydraRoms $hr.FullName).ToLowerInvariant() -replace '[^a-z0-9]+','-').Trim('-')
             if ($HydraIds.ContainsKey($hid)) { $hid += '-2' }; $HydraIds[$hid] = $true
             $hcore = HydraRel $HydraRoot $hc.FullName; $hrom = HydraRel $HydraRoot $hr.FullName
@@ -235,9 +283,11 @@ if ([IO.Directory]::Exists($HydraRoms) -and [IO.Directory]::Exists($HydraCores) 
         }
     }
     $Games = @($HydraGames)
+    Log 'INFO' "Hydra: $($HydraGames.Count) jogo(s) listados em $($swScan.ElapsedMilliseconds) ms (so a leitura das pastas: $($swEnum.ElapsedMilliseconds) ms)"
 }
 $hydraLibrary = Join-Path $Arq 'HydraLibrary.ps1'
 if ([IO.File]::Exists($hydraLibrary)) { . $hydraLibrary }
+Mark 'biblioteca Hydra preparada'
 $hydraStartup = Join-Path $Arq 'HydraStartup.ps1'
 if ([IO.File]::Exists($hydraStartup)) { . $hydraStartup }
 $dirty = $false
@@ -245,7 +295,7 @@ foreach ($g in $Games) { if (-not $g.Id) { $g | Add-Member NoteProperty Id (NewI
 if ($dirty) { Save }
 
 # ---- Layout (seu) ----
-$S = @{ Title = 'Launcher'; Accent = '#1E90FF'; Zoom = 2; Maximized = $false; PassHash = ''
+$S = @{ Title = 'Launcher'; Accent = '#00D9FF'; Zoom = 2; Maximized = $false; PassHash = ''
         CoverCacheMB = 96; CoverThreads = 2; CoverPrefetchRows = 2; LoadScreen = $true; ThumbCache = $true
         ShowSearch = $true; ShowFilter = $true; ShowZoom = $true; ShowPanel = $true
         ShowTitle = $true; ShowFav = $true; ShowVersion = $true; ShowLink = $true; ShowDesc = $true; ShowShot = $true
@@ -253,19 +303,19 @@ $S = @{ Title = 'Launcher'; Accent = '#1E90FF'; Zoom = 2; Maximized = $false; Pa
         CoverS1 = 128; CoverS2 = 180; CoverS3 = 256; GapH = 20; GapV = 14; PadX = 24; PadY = 20; GridCenter = $false; CoverFit = 'Preencher'
         NameLines = 2; NameSize = 9; NameGap = 6; NotInstalled = 'Preto e branco'; DimNotInst = 60; DimInstalled = 0; SelBright = $true; SmoothScroll = $true; InstRecheckSec = 60
         CoverDir = ''; ShotDir = ''; CoverPattern = '{Alt}|{Nome}|{Id}'; ShotPattern = '{Alt}|{Nome}|{Id}'; ImgExts = 'png,jpg,jpeg,bmp,gif'; ImgLoose = $true
-        ArchivePass = ''; UnrarPath = 'TarginoRetroStation\Ferramentas\UnRar\UnRAR.exe'; TdlPath = 'TarginoRetroStation\Ferramentas\Tdl\tdl.exe'; TelegramPath = 'TarginoRetroStation\Ferramentas\Telegram\Telegram.exe'; ArchiveDirs = ''; T_Archived = 'Compactado: será extraído ao jogar'
+        ArchivePass = ''; UnrarPath = 'TarginoRetroStation\Ferramentas\UnRar\UnRAR.exe'; ArchiveDirs = ''; T_Archived = 'Compactado: será extraído ao jogar'
         DetailWidth = 400; DescFont = ''; FontFamily = ''; TextWeight = 'Médio'; TextContrast = 6; TextRender = 'ClearType'; DescSize = 10; DescTitleSize = 18; DescSubSize = 13; DescLinkColor = '#4DA3FF'
-        DetailPad = 15; DetailBg = ''; TitleFont = ''; TitleSize = 18; TitleStyle = 'Normal'; TitleColor = ''; TitleLines = 2; TitleAlign = 'Esquerda'
+        DetailPad = 15; DetailBg = '#0B1626'; TitleFont = ''; TitleSize = 18; TitleStyle = 'Normal'; TitleColor = ''; TitleLines = 2; TitleAlign = 'Esquerda'
         StatusSize = 9; StatusColor = '#E07B7B'; StatusStyle = 'Normal'; StatusAlign = 'Centro'; StatusGapTop = 6; StatusGapBottom = 10; VersionSize = 9; VersionColor = ''; DescColor = ''; DescTitleColor = ''; DescAlign = 'Esquerda'
-        SelColor = '#1E90FF'; SelWidth = 3; SelGap = 3; SelStyle = 'Sólida'
+        SelColor = '#00D9FF'; SelWidth = 3; SelGap = 3; SelStyle = 'Sólida'
         # Cores gerais
-        BgColor = '#0B0B0B'; SideColor = '#141414'; TextColor = '#FFFFFF'; SubColor = '#9A9A9A'
+        BgColor = '#08111F'; SideColor = '#111D2E'; TextColor = '#FFFFFF'; SubColor = '#9BA9B8'
         # Personalização visual: caminhos opcionais escolhidos manualmente no painel de configurações
         BackgroundImage = ''; AvatarImage = ''; CinemaMode = $true; CinemaAnimate = $false
         JoystickEnabled = $true; JoyConfirm = 3; JoyBack = 2; JoyDetails = 4; JoyFilters = 1; JoyStart = 10
         JoyPageLeft = 5; JoyPageRight = 6; JoyPageSize = 8
         JoyActions = 9; JoySearchModifier = 9
-        Fullscreen = $true
+        Fullscreen = $true; ThemeProfile = 'Moderno'
         # Menu de filtros ao lado da busca (ShowFilter = mostrar o menu)
         SideItems = 'all,recent,fav'; RecentDays = 30; ShowSideCount = $true
         T_Fav = 'Favoritar'; T_Faved = 'Favorito'; T_Link = 'Baixar Jogo'; T_Version = 'Versão'; T_Zoom = 'Ampliar/Reduzir'; T_Offline = 'Unidade desconectada'
@@ -274,10 +324,10 @@ $S = @{ Title = 'Launcher'; Accent = '#1E90FF'; Zoom = 2; Maximized = $false; Pa
         DeleteColor = '#E5484D'; T_CtxDelete = 'Deletar jogo'
         NameStrip = '(WinPort)'
         T_CtxPlay = 'Jogar'; T_CtxFav = 'Favoritar'; T_CtxUnfav = 'Remover dos favoritos'
-        T_Starting = 'Iniciando...'; T_Running = 'Em execução'; T_Extracting = 'Extraindo seu jogo'; T_CtxStop = 'Fechar jogo'; T_Downloading = 'Baixando seu jogo'; T_CtxCancelDl = 'Cancelar download'
+        T_Starting = 'Iniciando...'; T_Running = 'Em execução'; T_Extracting = 'Extraindo seu jogo'; T_CtxStop = 'Fechar jogo'
         # Topo (v2.50.0): nome do launcher com brilho, linha decorativa e dica na busca
         HeaderShow = $true; HeaderText = 'Targino RetroStation'; HeaderFont = ''; HeaderSize = 22; HeaderStyle = 'Negrito'; HeaderCaps = $false; HeaderSpacing = 1
-        HeaderColor = '#3BA4FF'; HeaderFill = 'Degradê suave'; HeaderGlow = 35; HeaderGlowSize = 10; HeaderGlowColor = ''; HeaderPadTop = 10; HeaderPadBottom = 0
+        HeaderColor = '#00D9FF'; HeaderFill = 'Degradê suave'; HeaderGlow = 35; HeaderGlowSize = 10; HeaderGlowColor = '#00D9FF'; HeaderPadTop = 10; HeaderPadBottom = 0
         HeaderLine = $true; HeaderLineColor = ''; HeaderLineWidth = 50; SearchHint = 'Pesquisar jogos...'
         HeaderArea = 'Área dos jogos'; HeaderAlign = 'Centro'; HeaderOffsetX = 0; TopJoin = $true
         SearchArea = 'Área dos jogos'; SearchAlign = 'Centro'; SearchOffsetX = 0; FilterArea = 'Área dos jogos'; FilterAlign = 'Centro'; FilterOffsetX = 0
@@ -288,6 +338,8 @@ $o = ReadJson $SetFile
 if ($o) { foreach ($p in $o.PSObject.Properties) { if ($Defaults.ContainsKey($p.Name)) { $S[$p.Name] = $p.Value } } }
 $targinoPreferencesSource=Join-Path $Arq 'TarginoPreferences.ps1'
 if([IO.File]::Exists($targinoPreferencesSource)){. $targinoPreferencesSource}
+$themeProfilesSource=Join-Path $Arq 'ThemeProfiles.ps1'
+if([IO.File]::Exists($themeProfilesSource)){. $themeProfilesSource}
 function SaveSettings {
     if(Get-Command TarginoEnforceIdentity -ErrorAction SilentlyContinue){TarginoEnforceIdentity}
     [void](WriteJson $SetFile $S 4)
@@ -754,6 +806,7 @@ function GameStart($gm) {
         if($null -eq $launchPlan){return}
         $launchArguments=[string]$launchPlan.Arguments
     }
+    if ($launchPlan.Exe) { $exe = [string]$launchPlan.Exe }
     if ([IO.Path]::GetFileName($exe) -ine 'hydra.exe') { UnblockGame $gm }
     if($script:TarginoMusicPlayer){TarginoPauseForGame}
     try {
@@ -762,7 +815,7 @@ function GameStart($gm) {
                 if ($existingHydra.MainModule.FileName -ine $exe) { continue }
                 [void]$existingHydra.CloseMainWindow()
                 if (-not $existingHydra.WaitForExit(3000)) {
-                    throw 'O Hydra anterior continua aberto. Feche-o para iniciar outro jogo.'
+                    try { $existingHydra.Kill(); [void]$existingHydra.WaitForExit(2000) } catch {}
                 }
             }
         }
@@ -931,7 +984,7 @@ function PlayBegin($gm, $pr) {
         $entry.ReturnObserver = $null
         try {
             HydraLoadDirectBridge
-            $entry.ReturnObserver = New-Object HydraDirectBridge+ReturnObserver($pr,(ExePath $gm))
+            $entry.ReturnObserver = $null
         } catch { Log 'AVISO' 'Estado nativo de retorno indisponivel; usando acompanhamento do core.' }
         $entry.WindowState = $form.WindowState
         if ($hydraReturnTm) { $hydraReturnTm.Start() }
@@ -1154,7 +1207,6 @@ function PaintPlayLabel($gr, $c, $gx, $p, $tr, $mid, $lbl = '') {      # $lbl: t
 function ExtLabel($id) {
     $elR = RunFind $id
     if ($elR -and $elR.Stage -eq 'extra' -and $elR.UP) { return "Extraindo $($elR.UP.Label)" }
-    if ($elR -and $elR.Stage -eq 'dl') { return (PlayText 'T_Downloading' 'Baixando seu jogo') }      # v2.53.0: download pelo Telegram
     PlayText 'T_Extracting' 'Extraindo seu jogo'
 }
 # Grade sem nomes: o texto vai numa faixa escura sobre a capa (como no "Em execução")
@@ -1667,10 +1719,10 @@ function OfferMissingGameDownload($g) {
 # Acompanha a extração em andamento (timer de 500 ms; não bloqueia a janela)
 function RunTick {
     foreach ($run in @($script:Runs)) {
-        try { if ($run.Stage -eq 'unpack') { UnpackTick $run } elseif ($run.Stage -eq 'extra') { ExtraTick $run } elseif ($run.Stage -eq 'dl') { TgTick $run } else { RunRemove $run } }
+        try { if ($run.Stage -eq 'unpack') { UnpackTick $run } elseif ($run.Stage -eq 'extra') { ExtraTick $run } else { RunRemove $run } }
         catch {
             LogEx 'ERRO' "Falha ao acompanhar '$($run.Name)': $($_.Exception.Message)" $_
-            if ($run.Stage -eq 'unpack') { UnpackFail $run "erro inesperado: $($_.Exception.Message)" } elseif ($run.Stage -eq 'extra') { ExtraFail $run "erro inesperado: $($_.Exception.Message)" } elseif ($run.Stage -eq 'dl') { TgFail $run "erro inesperado: $($_.Exception.Message)" $true } else { RunRemove $run }
+            if ($run.Stage -eq 'unpack') { UnpackFail $run "erro inesperado: $($_.Exception.Message)" } elseif ($run.Stage -eq 'extra') { ExtraFail $run "erro inesperado: $($_.Exception.Message)" } else { RunRemove $run }
         }
     }
     if (-not $script:Runs.Count) { $runTm.Stop() }
@@ -1735,400 +1787,11 @@ function OpenTarget($text, $what, [bool]$allowLocal = $true) {
     }
 }
 
-# ---- Baixar Jogo pelo Telegram (v2.53.0) ----
-#  O "Baixar Jogo" do menu do botão direito: se o Link do jogo tem um ou mais links https://t.me/..., o launcher baixa os arquivos
-#  dessas mensagens direto para a pasta Jogos (com o progresso na capa, como na extração). Sem link do Telegram ou sem o tdl.exe,
-#  continua abrindo o Link como antes.
-#  Quem baixa é o tdl.exe (Ferramentas\Tdl, programa livre: github.com/iyear/tdl), sem janela, usando a conta do Telegram da pessoa.
-#  Conexão: na primeira vez o launcher abre o Telegram portátil (Ferramentas\Telegram) para a pessoa entrar na conta dela (QR code ou
-#  número) e depois lê esse login da pasta tdata do Telegram portátil e guarda a sessão em TarginoRetroStation\Cache\Telegram\sessao.json.
-#  Nada vai para o C:: o tdl roda com a "pasta do usuário" apontando para TarginoRetroStation\Cache\Telegram\tdl (log, temporários).
-#  NUNCA distribua Ferramentas\Telegram\tdata nem TarginoRetroStation\Cache\Telegram: dão acesso à conta do Telegram de quem conectou.
-#  Download: vai para uma pasta oculta Jogos\.ca_dl_<código> e, só quando TODOS os arquivos terminam, eles são movidos para Jogos\.
-#  Se falhar ou for cancelado, o que já terminou fica guardado e a próxima tentativa continua de onde parou.
-#  Conta desconectada (sessão encerrada pelo celular, por exemplo): a sessão é apagada e a janela de conectar aparece de novo.
-function TgPaths {
-    $tc = [IO.Path]::Combine((ArqDir 'Cache'), 'Telegram')
-    $tdl = "$($S.TdlPath)".Trim(); if (-not $tdl) { $tdl = $Defaults.TdlPath }
-    $tge = "$($S.TelegramPath)".Trim(); if (-not $tge) { $tge = $Defaults.TelegramPath }
-    @{ Tdl = (Full $tdl); TgExe = (Full $tge); Dir = $tc; Sess = [IO.Path]::Combine($tc, 'sessao.json'); Home = [IO.Path]::Combine($tc, 'tdl') }
-}
-function TgUrls($txt) {
-    $out = @()
-    foreach ($m in [regex]::Matches("$txt", 'https?://(?:www\.)?t(?:elegram)?\.me/[^\s"''<>]+', 'IgnoreCase')) { $u = $m.Value.TrimEnd('.', ',', ';', ')'); if ($out -notcontains $u) { $out += $u } }
-    $out
-}
-function TgSessionOk { $p = TgPaths; try { return ([IO.File]::Exists($p.Sess) -and (New-Object IO.FileInfo $p.Sess).Length -gt 100) } catch { $Error.Clear(); $false } }
+# ---- Link do jogo ----
 function GameLinkOpen($g) {
     if($script:HydraNavigationEnabled){return} # RetroStation never downloads games.
     if (-not $g -or -not $g.Link) { return }
-    $urls = @(TgUrls $g.Link); $p = TgPaths
-    if ($urls.Count -or "$($g.Link)" -match '^tg://') {
-        if (-not $p.TgExe -or -not [IO.File]::Exists($p.TgExe)) {
-            [void][Windows.Forms.MessageBox]::Show($form,"Telegram não encontrado em:`n$($p.TgExe)`nAjuste o caminho em Personalizar > Compactados.",'Telegram'); return
-        }
-        $targets=@($urls); if (-not $targets.Count) { $targets=@("$($g.Link)") }
-        try {
-            $arguments='-- '+(($targets | ForEach-Object { TgQuote $_ }) -join ' ')
-            [void](ShellOpen $p.TgExe $arguments ([IO.Path]::GetDirectoryName($p.TgExe)))
-            Log 'INFO' "Telegram aberto para '$($g.Name)'. Após baixar em Jogos, pressione Jogar novamente para extrair e executar."
-        } catch {
-            LogEx 'ERRO' 'Não foi possível abrir o Telegram' $_
-            [void][Windows.Forms.MessageBox]::Show($form,"Não foi possível abrir o Telegram: $($_.Exception.Message)",'Telegram')
-        }
-        return
-    }
     [void](OpenTarget $g.Link "link de '$($g.Name)'")
-}
-function TgDownload($g, $urls) {
-    $id = "$($g.Id)"
-    if (RunFind $id) { return }
-    if ($script:Del.ContainsKey($id)) { [void][Windows.Forms.MessageBox]::Show("'$($g.Name)' está sendo apagado do disco. Aguarde terminar.", 'Baixar jogo'); return }
-    $st = $script:InstState[$id]
-    if ($st -eq 'ok' -or $st -eq 'archived') {
-        $r = [Windows.Forms.MessageBox]::Show("'$($g.Name)' já está na pasta Jogos.`nBaixar de novo?", 'Baixar jogo', 'YesNo', 'Question')
-        if ($r -ne 'Yes') { return }
-    }
-    if (-not (TgSessionOk)) { if (-not (TgConnect)) { return } }
-    TgStart $g $urls
-}
-# Argumento de linha de comando com aspas quando precisa (mesma regra do Windows usada no PassArg)
-function TgQuote($a) {
-    $a = "$a"
-    if ($a -and $a -notmatch '[\s"]') { return $a }
-    '"' + ($a -replace '(\\*)"', '$1$1\"' -replace '(\\+)$', '$1$1') + '"'
-}
-# Fecha o Telegram PORTÁTIL do launcher (só o executável de TelegramPath; o Telegram instalado da pessoa nunca é tocado).
-#  Ele e o tdl usam o mesmo login: abertos juntos, o Telegram fica lento até ser reaberto (v2.54.1).
-function TgCloseDesktop($p) {
-    if (-not $p.TgExe) { return }
-    foreach ($tp in @(Get-Process -Name 'Telegram' -ErrorAction SilentlyContinue)) {
-        try {
-            $fn = ''; try { $fn = "$($tp.MainModule.FileName)" } catch { $Error.Clear() }
-            if ($fn -and $fn -ieq $p.TgExe -and -not $tp.HasExited) {
-                $tp.Kill(); [void]$tp.WaitForExit(5000)
-                Log 'INFO' "Telegram portátil fechado para o download (processo $($tp.Id))"
-            }
-        } catch { LogEx 'AVISO' "Não foi possível fechar o Telegram portátil: $($_.Exception.Message)" $_ } finally { $tp.Dispose() }
-    }
-    $Error.Clear()
-}
-function TgStart($g, $urls) {
-    $p = TgPaths; $id = "$($g.Id)"
-    TgCloseDesktop $p
-    $run = @{ Id = $id; Name = "$($g.Name)"; Game = $g; Stage = 'dl'; UP = $null }
-    try {
-        $jd = [IO.Path]::Combine($Root, 'Jogos'); [void][IO.Directory]::CreateDirectory($jd)
-        $tmp = [IO.Path]::Combine($jd, ".ca_dl_$((Hash $id).Substring(0, 10))")
-        [void][IO.Directory]::CreateDirectory($tmp)
-        try { $di = New-Object IO.DirectoryInfo $tmp; $di.Attributes = $di.Attributes -bor [IO.FileAttributes]::Hidden } catch { $Error.Clear() }
-        foreach ($tf in [IO.Directory]::GetFiles($tmp, '*.tmp')) { try { [IO.File]::Delete($tf) } catch { $Error.Clear() } }      # pedaço incompleto de antes: o tdl baixa esse arquivo de novo
-        $ttmp = [IO.Path]::Combine($p.Home, 'temp'); [void][IO.Directory]::CreateDirectory($ttmp)
-        $al = @('--storage', "type=file,path=$($p.Sess)", '--reconnect-timeout', '2m', '-l', '10', '-t', '2', 'dl', '--continue', '--group', '--skip-same',
-                '--template', '{{ filenamify .FileName }}', '-d', $tmp)
-        foreach ($u in $urls) { $al += '-u'; $al += $u }
-        $psi = New-Object Diagnostics.ProcessStartInfo; $psi.FileName = $p.Tdl; $psi.Arguments = (($al | ForEach-Object { TgQuote $_ }) -join ' ')
-        $psi.WorkingDirectory = $p.Home; $psi.UseShellExecute = $false; $psi.CreateNoWindow = $true
-        $psi.RedirectStandardOutput = $true; $psi.RedirectStandardError = $true; $psi.RedirectStandardInput = $true
-        $psi.StandardOutputEncoding = [Text.Encoding]::UTF8; $psi.StandardErrorEncoding = [Text.Encoding]::UTF8
-        foreach ($ev in 'USERPROFILE', 'HOME', 'APPDATA', 'LOCALAPPDATA') { $psi.EnvironmentVariables[$ev] = $p.Home }      # o tdl guarda log/extensões na "pasta do usuário": fica tudo em Cache\Telegram\tdl
-        foreach ($ev in 'TEMP', 'TMP') { $psi.EnvironmentVariables[$ev] = $ttmp }
-        $pr = [Diagnostics.Process]::Start($psi)
-        try { $pr.StandardInput.Close() } catch { $Error.Clear() }
-    } catch {
-        LogEx 'ERRO' "Não foi possível iniciar o download de '$($g.Name)': $($_.Exception.Message)" $_
-        [void][Windows.Forms.MessageBox]::Show("Não foi possível iniciar o download de '$($g.Name)'.`n$($_.Exception.Message)", 'Baixar jogo', 'OK', 'Warning'); return
-    }
-    $run.UP = @{ Proc = $pr; Tmp = $tmp; Urls = @($urls); Out = (New-Object Text.StringBuilder); Poll = (Get-Date); Since = (Get-Date); Wait = 0
-                 Rd = @(@{ R = $pr.StandardOutput; Buf = (New-Object char[] 8192); T = $null; Eof = $false }, @{ R = $pr.StandardError; Buf = (New-Object char[] 8192); T = $null; Eof = $false }) }
-    $script:Ext[$id] = @{ Phase = 'run'; P = 0.0; T = 0.0; Since = (Get-Date); End = $null; Idx = -1 }
-    $script:Runs += $run; RunStatus
-    if ($runTm) { $runTm.Start() }; if ($extTm) { $extTm.Start() }
-    $grid.Invalidate()
-    Log 'INFO' "Baixando '$($g.Name)' pelo Telegram ($($urls.Count) link(s): $($urls -join ' '))"
-}
-# Lê a saída do tdl sem travar a janela (leituras assíncronas conferidas a cada tique do timer)
-function TgPump($dl) {
-    foreach ($r in $dl.Rd) {
-        if ($r.Eof) { continue }
-        for ($k = 0; $k -lt 64; $k++) {
-            if ($null -eq $r.T) { try { $r.T = $r.R.ReadAsync($r.Buf, 0, $r.Buf.Length) } catch { $Error.Clear(); $r.Eof = $true; break } }
-            if (-not $r.T.IsCompleted) { break }
-            $n = 0; try { $n = [int]$r.T.Result } catch { $Error.Clear(); $n = 0 }
-            $r.T = $null
-            if ($n -le 0) { $r.Eof = $true; break }
-            [void]$dl.Out.Append($r.Buf, 0, $n)
-        }
-    }
-    if ($dl.Out.Length -gt 262144) { $keep = $dl.Out.ToString($dl.Out.Length - 65536, 65536); [void]$dl.Out.Clear(); [void]$dl.Out.Append($keep) }
-}
-function TgClean($t) { ("$t" -replace '\x1b\[[0-9;?]*[ -/]*[@-~]', '') }
-# Progresso total: a barra geral do tdl ([#####.....], a mais longa da tela) diz quanto do total já veio
-function TgFrac($dl) {
-    $len = [Math]::Min($dl.Out.Length, 16000); if ($len -le 0) { return -1.0 }
-    $t = TgClean ($dl.Out.ToString($dl.Out.Length - $len, $len))
-    $ms = [regex]::Matches($t, '\[([#.]{20,})\]'); if (-not $ms.Count) { return -1.0 }
-    $bar = $ms[$ms.Count - 1].Groups[1].Value
-    ($bar.Length - $bar.Replace('#', '').Length) / [double]$bar.Length
-}
-function TgIsAuthErr($t) { "$t" -match '(?i)not authorized|AUTH_KEY_UNREGISTERED|AUTH_KEY_INVALID|AUTH_KEY_DUPLICATED|SESSION_REVOKED|SESSION_EXPIRED|USER_DEACTIVATED' }
-function TgSaveLog($dl, $code) {
-    try { WriteText ([IO.Path]::Combine($LogDir, 'telegram_ultimo.log')) ("Saída do tdl (código $code)`r`n" + (TgClean $dl.Out.ToString())) } catch { $Error.Clear() }
-}
-function TgTick($run) {
-    $dl = $run.UP; $id = "$($run.Id)"; $e = $script:Ext[$id]
-    TgPump $dl
-    if (((Get-Date) - $dl.Poll).TotalMilliseconds -ge 700) {
-        $dl.Poll = Get-Date
-        $f = TgFrac $dl
-        if ($f -ge 0 -and $e) { $e.T = [Math]::Min(0.985, [Math]::Max([double]$e.T, $f)) }
-    }
-    if (-not $dl.Proc.HasExited) { return }
-    $eof = $true; foreach ($r in $dl.Rd) { if (-not $r.Eof) { $eof = $false } }
-    if (-not $eof) { $dl.Wait++; if ($dl.Wait -lt 20) { return } }      # terminou: espera a saída acabar de chegar (no máximo ~10 s)
-    $code = $dl.Proc.ExitCode; try { $dl.Proc.Dispose() } catch { $Error.Clear() }
-    $txt = TgClean $dl.Out.ToString(); TgSaveLog $dl $code
-    $files = @(); $partial = $false
-    try { foreach ($f0 in [IO.Directory]::GetFiles($dl.Tmp)) { if ($f0 -like '*.tmp') { $partial = $true } else { $files += $f0 } } } catch { $Error.Clear() }
-    $itemErr = ($txt -cmatch 'failed!' -or $txt -cmatch '-> .* error: ')      # o tdl só avisa na tela quando UM arquivo falha (e termina com código 0)
-    if ($code -eq 0 -and $files.Count -and -not $partial -and -not $itemErr) { TgFinish $run $files; return }
-    Log 'AVISO' "tdl terminou com código $code ao baixar '$($run.Name)' ($($files.Count) arquivo(s) prontos; saída em Logs\telegram_ultimo.log)"
-    if (TgIsAuthErr $txt) {
-        try { [IO.File]::Delete((TgPaths).Sess) } catch { $Error.Clear() }
-        Log 'AVISO' 'A conta do Telegram foi desconectada: sessão apagada, pedindo para conectar de novo'
-        TgFail $run '' $false
-        [void][Windows.Forms.MessageBox]::Show("Sua conta do Telegram foi desconectada do launcher.`nConecte de novo para continuar o download.", 'Baixar jogo', 'OK', 'Information')
-        if (TgConnect) { TgStart $run.Game $dl.Urls }
-        return
-    }
-    $err = ''; $m = [regex]::Match($txt, '(?m)Error:\s*(.+)$'); if ($m.Success) { $err = $m.Groups[1].Value.Trim() }
-    if ($err.Length -gt 220) { $err = $err.Substring(0, 220) + '...' }
-    $why = if ($txt -match '(?i)FLOOD_WAIT|FLOOD_PREMIUM') { 'O Telegram limitou os downloads desta conta por alguns minutos. Tente de novo mais tarde.' }
-           elseif ($txt -match '(?i)CHANNEL_PRIVATE|CHANNEL_INVALID|USERNAME_NOT_OCCUPIED|USERNAME_INVALID|MSG_ID_INVALID|message not found|invalid message link') { "A mensagem do Telegram não foi encontrada (o link do jogo pode estar errado ou a postagem foi apagada).`n$err" }
-           elseif ($itemErr -and $code -eq 0) { 'Um ou mais arquivos não terminaram de baixar. Tente de novo: o que já veio fica guardado.' }
-           elseif ($code -eq 0 -and -not $files.Count) { 'A mensagem do Telegram não tem nenhum arquivo para baixar. Confira o link do jogo.' }
-           elseif ($txt -match '(?i)dial tcp|i/o timeout|connection refused|no such host|network is unreachable|context deadline exceeded|reconnect') { 'Não foi possível conectar ao Telegram. Confira sua internet e tente de novo.' }
-           elseif ($err) { "O download falhou: $err" } else { "O download falhou (código $code)." }
-    TgFail $run $why $true
-}
-function TgFail($run, $why, [bool]$show) {
-    $id = "$($run.Id)"; $dl = $run.UP
-    if ($dl -and $dl.Proc) { try { if (-not $dl.Proc.HasExited) { $dl.Proc.Kill(); [void]$dl.Proc.WaitForExit(3000) } } catch { $Error.Clear() } }
-    if ($dl -and $dl.Tmp) { try { foreach ($tf in [IO.Directory]::GetFiles($dl.Tmp, '*.tmp')) { try { [IO.File]::Delete($tf) } catch { $Error.Clear() } } } catch { $Error.Clear() } }
-    if ($why) { Log 'ERRO' "Download de '$($run.Name)' falhou: $why" }
-    $script:Ext[$id] = @{ Phase = 'fail'; P = 0.0; T = 0.0; Since = (Get-Date); End = (Get-Date); Idx = -1 }
-    RunRemove $run; if ($extTm) { $extTm.Start() }; $grid.Invalidate()
-    if ($show) { [void][Windows.Forms.MessageBox]::Show("Não foi possível baixar '$($run.Name)'.`n$why`n`nO que já foi baixado fica guardado: tente de novo pelo Baixar Jogo.", 'Baixar jogo', 'OK', 'Warning') }
-}
-function TgCancel($id) {
-    $run = RunFind "$id"; if (-not $run -or $run.Stage -ne 'dl') { return }
-    Log 'INFO' "Download de '$($run.Name)' cancelado pela pessoa"
-    TgFail $run '' $false
-}
-function TgFinish($run, $files) {
-    $id = "$($run.Id)"; $dl = $run.UP; $jd = [IO.Path]::Combine($Root, 'Jogos'); $mv = 0
-    try {
-        foreach ($f0 in $files) {
-            $dst = [IO.Path]::Combine($jd, [IO.Path]::GetFileName($f0))
-            if ([IO.File]::Exists($dst)) { [IO.File]::Delete($dst) }      # versão antiga do mesmo arquivo: a nova substitui
-            [IO.File]::Move($f0, $dst); $mv++
-        }
-    } catch { TgFail $run "Os arquivos foram baixados, mas não puderam ser movidos para a pasta Jogos: $($_.Exception.Message)" $true; return }
-    if (-not [CaFs]::DeleteTree($dl.Tmp)) { Log 'AVISO' "Pasta temporária do download não pôde ser apagada: $([CaFs]::LastError)" }
-    $script:Drive = @{}; $script:PathSeen = @{}; [void](CheckGame $run.Game); InstSave
-    $st = $script:InstState[$id]
-    Log 'INFO' "Download de '$($run.Name)' concluído: $mv arquivo(s) em Jogos\ em $([int](((Get-Date) - $dl.Since).TotalSeconds)) s (estado: $st)"
-    $script:Ext[$id] = @{ Phase = 'done'; P = 1.0; T = 1.0; Since = (Get-Date); End = (Get-Date); Idx = -1 }
-    $run.Stage = ''; $run.UP = $null; RunRemove $run
-    if ($extTm) { $extTm.Start() }
-    Populate; ShowGame (Sel)
-    if ($st -ne 'ok' -and $st -ne 'archived') {
-        $gf = GameFolder $run.Game; $nm = $(if ($gf) { $gf.Name } else { "$($run.Name)" })
-        Log 'AVISO' "Download de '$($run.Name)': os arquivos baixados não correspondem ao jogo (esperado '$nm.rar' ou '$nm.part1.rar' em Jogos\)"
-        [void][Windows.Forms.MessageBox]::Show("O download de '$($run.Name)' terminou e os arquivos estão na pasta Jogos, mas o launcher não reconheceu o jogo.`nO arquivo precisa se chamar '$nm.rar' (ou '$nm.part1.rar', '$nm.part2.rar'...).", 'Baixar jogo', 'OK', 'Warning')
-    }
-}
-
-# ---- Login do Telegram: lido da pasta tdata do Telegram portátil (o mesmo formato que o tdl importa com "tdl login -T desktop") ----
-#  Só a conta que está aberta no Telegram portátil. Senha de bloqueio local (se a pessoa usa) é pedida na janela de conectar.
-#  Gera o sessao.json no formato de armazenamento "file" do tdl. A chave da conta nunca vai para o log.
-function TgSub([byte[]]$b, [int]$o, [int]$n) { $r = New-Object byte[] $n; [Array]::Copy($b, $o, $r, 0, $n); , $r }
-function TgBE32([byte[]]$b, [int]$o) { [long]$b[$o] * 16777216 + [long]$b[$o + 1] * 65536 + [long]$b[$o + 2] * 256 + [long]$b[$o + 3] }
-function TgCat { $ms = New-Object IO.MemoryStream; foreach ($a in $args) { $ms.Write([byte[]]$a, 0, $a.Length) }; , $ms.ToArray() }
-function TgSha1([byte[]]$b) { $h = [Security.Cryptography.SHA1]::Create(); try { $r = $h.ComputeHash($b) } finally { $h.Dispose() }; , $r }
-function TgReadAll($fp) {
-    $fs = New-Object IO.FileStream $fp, ([IO.FileMode]::Open), ([IO.FileAccess]::Read), ([IO.FileShare]'ReadWrite, Delete')
-    try { $b = New-Object byte[] $fs.Length; $o = 0; while ($o -lt $b.Length) { $n = $fs.Read($b, $o, $b.Length - $o); if ($n -le 0) { break }; $o += $n } } finally { $fs.Dispose() }
-    , $b
-}
-function TgReadTd($base) {      # arquivo do Telegram: 'TDF$' + versão + dados + MD5; tenta os nomes <base>s, <base>0 e <base>1
-    foreach ($suf in 's', '0', '1') {
-        $fp = $base + $suf; if (-not [IO.File]::Exists($fp)) { continue }
-        $b = TgReadAll $fp
-        if ($b.Length -lt 24 -or $b[0] -ne 84 -or $b[1] -ne 68 -or $b[2] -ne 70 -or $b[3] -ne 36) { continue }
-        $data = TgSub $b 8 ($b.Length - 24); $ver = TgSub $b 4 4
-        $md = [Security.Cryptography.MD5]::Create()
-        try { $chk = $md.ComputeHash((TgCat $data ([BitConverter]::GetBytes([int]$data.Length)) $ver ([byte[]](84, 68, 70, 36)))) } finally { $md.Dispose() }
-        $ok = $true; for ($i = 0; $i -lt 16; $i++) { if ($chk[$i] -ne $b[$b.Length - 16 + $i]) { $ok = $false; break } }
-        if ($ok) { return , $data }
-    }
-    $null
-}
-function TgArr([byte[]]$d, [int]$o) {
-    $n = TgBE32 $d $o
-    if ($n -eq 4294967295) { return @{ B = (New-Object byte[] 0); N = $o + 4 } }
-    if ($o + 4 + $n -gt $d.Length) { throw 'arquivo do Telegram incompleto' }
-    @{ B = (TgSub $d ($o + 4) ([int]$n)); N = $o + 4 + [int]$n }
-}
-function TgIgeDec([byte[]]$key, [byte[]]$iv, [byte[]]$src) {
-    $aes = New-Object Security.Cryptography.RijndaelManaged
-    $aes.BlockSize = 128; $aes.KeySize = 256; $aes.Mode = [Security.Cryptography.CipherMode]::ECB; $aes.Padding = [Security.Cryptography.PaddingMode]::None; $aes.Key = $key
-    $dec = $aes.CreateDecryptor()
-    $out = New-Object byte[] $src.Length; $x = New-Object byte[] 16; $y = New-Object byte[] 16
-    $c = TgSub $iv 0 16; $m = TgSub $iv 16 16
-    try {
-        for ($o = 0; $o -lt $src.Length; $o += 16) {
-            for ($i = 0; $i -lt 16; $i++) { $x[$i] = $src[$o + $i] -bxor $m[$i] }
-            [void]$dec.TransformBlock($x, 0, 16, $y, 0)
-            for ($i = 0; $i -lt 16; $i++) { $out[$o + $i] = $y[$i] -bxor $c[$i] }
-            $c = TgSub $src $o 16; $m = TgSub $out $o 16
-        }
-    } finally { $dec.Dispose(); $aes.Clear() }
-    , $out
-}
-function TgDecLocal([byte[]]$enc, [byte[]]$lk) {      # $null = chave errada (senha de bloqueio errada)
-    if ($enc.Length -lt 32 -or ($enc.Length % 16) -ne 0) { throw 'dados do Telegram em formato inesperado' }
-    $mk = TgSub $enc 0 16; $x = 8
-    $a = TgSha1 (TgCat $mk (TgSub $lk $x 32))
-    $b = TgSha1 (TgCat (TgSub $lk (32 + $x) 16) $mk (TgSub $lk (48 + $x) 16))
-    $c = TgSha1 (TgCat (TgSub $lk (64 + $x) 32) $mk)
-    $d = TgSha1 (TgCat $mk (TgSub $lk (96 + $x) 32))
-    $key = TgCat (TgSub $a 0 8) (TgSub $b 8 12) (TgSub $c 4 12)
-    $iv = TgCat (TgSub $a 8 12) (TgSub $b 0 8) (TgSub $c 16 4) (TgSub $d 0 8)
-    $dec = TgIgeDec $key $iv (TgSub $enc 16 ($enc.Length - 16))
-    $h = TgSha1 $dec; for ($i = 0; $i -lt 16; $i++) { if ($h[$i] -ne $mk[$i]) { return $null } }
-    , $dec
-}
-function TgPbkdf2([byte[]]$pw, [byte[]]$salt, [int]$it) {      # PBKDF2-HMAC-SHA512, 256 bytes
-    try {
-        $kd = [Security.Cryptography.Rfc2898DeriveBytes]::new($pw, $salt, $it, [Security.Cryptography.HashAlgorithmName]::SHA512)
-        try { $r = $kd.GetBytes(256) } finally { $kd.Dispose() }
-        return , $r
-    } catch { $Error.Clear() }
-    $hm = New-Object Security.Cryptography.HMACSHA512 (, $pw); $out = New-Object byte[] 256
-    try {
-        for ($blk = 1; $blk -le 4; $blk++) {
-            $u = $hm.ComputeHash((TgCat $salt ([byte[]](0, 0, 0, $blk)))); $t = [byte[]]$u.Clone()
-            for ($j = 2; $j -le $it; $j++) { $u = $hm.ComputeHash($u); for ($i = 0; $i -lt 64; $i++) { $t[$i] = $t[$i] -bxor $u[$i] } }
-            [Array]::Copy($t, 0, $out, ($blk - 1) * 64, 64)
-        }
-    } finally { $hm.Dispose() }
-    , $out
-}
-function TgFileKey($s) {      # nome do arquivo de dados da conta: MD5 com os dois "meio-bytes" trocados, 16 primeiros caracteres
-    $md = [Security.Cryptography.MD5]::Create(); try { $h = $md.ComputeHash([Text.Encoding]::UTF8.GetBytes($s)) } finally { $md.Dispose() }
-    $sb = New-Object Text.StringBuilder
-    foreach ($v in $h) { [void]$sb.Append((((([int]$v -shl 4) -band 0xF0) -bor ([int]$v -shr 4))).ToString('X2')) }
-    $sb.ToString().Substring(0, 16)
-}
-function TgImport($pass) {
-    $res = @{ Ok = $false; NeedPass = $false; Msg = '' }
-    $notYet = 'Ainda não encontrei uma conta conectada no Telegram. Entre na sua conta na janela do Telegram e clique de novo em "Já entrei".'
-    try {
-        $p = TgPaths; $td = [IO.Path]::Combine([IO.Path]::GetDirectoryName($p.TgExe), 'tdata')
-        if (-not [IO.Directory]::Exists($td)) { $res.Msg = $notYet; return $res }
-        $kd = TgReadTd ([IO.Path]::Combine($td, 'key_data')); if ($null -eq $kd) { $res.Msg = $notYet; return $res }
-        $a1 = TgArr $kd 0; $a2 = TgArr $kd $a1.N; $a3 = TgArr $kd $a2.N
-        $salt = [byte[]]$a1.B; if ($salt.Length -ne 32) { throw 'formato do Telegram não reconhecido' }
-        $pc = [Text.Encoding]::UTF8.GetBytes("$pass"); $it = 1; if ($pc.Length) { $it = 100000 }
-        $sh = [Security.Cryptography.SHA512]::Create(); try { $hp = $sh.ComputeHash((TgCat $salt $pc $salt)) } finally { $sh.Dispose() }
-        $inner = TgDecLocal $a2.B (TgPbkdf2 $hp $salt $it)
-        if ($null -eq $inner) {
-            $res.NeedPass = $true
-            $res.Msg = $(if ($pc.Length) { 'Senha de bloqueio incorreta. Tente de novo.' } else { 'Seu Telegram tem uma senha de bloqueio. Digite-a abaixo e clique em "Já entrei".' })
-            return $res
-        }
-        if ([BitConverter]::ToInt32($inner, 0) -lt 256) { throw 'chave local do Telegram inválida' }
-        $lk = TgSub $inner 4 256
-        $info = TgDecLocal $a3.B $lk; if ($null -eq $info) { throw 'não foi possível ler a lista de contas' }
-        if ((TgBE32 $info 4) -lt 1) { $res.Msg = $notYet; return $res }
-        $idx = TgBE32 $info 8
-        $md = TgReadTd ([IO.Path]::Combine($td, (TgFileKey $(if ($idx -eq 0) { 'data' } else { "data#$($idx + 1)" })))); if ($null -eq $md) { $res.Msg = $notYet; return $res }
-        $dec = TgDecLocal (TgArr $md 0).B $lk; if ($null -eq $dec) { throw 'não foi possível ler os dados da conta' }
-        $o = 4
-        if ((TgBE32 $dec $o) -ne 75) { $res.Msg = $notYet; return $res }      # 0x4b = dados de autorização
-        $o += 8; $lu = TgBE32 $dec $o; $ld = TgBE32 $dec ($o + 4); $o += 8
-        if ($lu -eq 4294967295 -and $ld -eq 4294967295) { $o += 8; $mdc = TgBE32 $dec $o; $o += 4 } else { $mdc = $ld }
-        $nk = TgBE32 $dec $o; $o += 4; $key = $null
-        for ($i = 0; $i -lt $nk; $i++) { if ((TgBE32 $dec $o) -eq $mdc) { $key = TgSub $dec ($o + 4) 256 }; $o += 260 }
-        if ($null -eq $key) { $res.Msg = $notYet; return $res }
-        $kid = TgSub (TgSha1 $key) 12 8
-        $ips = @{ 1 = '149.154.175.53'; 2 = '149.154.167.51'; 3 = '149.154.175.100'; 4 = '149.154.167.91'; 5 = '91.108.56.130' }
-        $ip = $ips[[int]$mdc]; if (-not $ip) { $ip = '149.154.167.51' }
-        $sess = '{"Version":1,"Data":{"DC":' + [int]$mdc + ',"Addr":"' + $ip + ':443","AuthKey":"' + [Convert]::ToBase64String($key) + '","AuthKeyID":"' + [Convert]::ToBase64String($kid) + '","Salt":0}}'
-        $store = '{"default":{"app":"' + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes('desktop')) + '","session":"' + [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($sess)) + '"}}'
-        [void][IO.Directory]::CreateDirectory($p.Dir)
-        [IO.File]::WriteAllText($p.Sess, $store, (New-Object Text.UTF8Encoding $false))      # sem BOM (o tdl lê JSON puro)
-        Log 'INFO' "Telegram conectado: login importado do Telegram portátil (DC $mdc)"
-        $res.Ok = $true
-    } catch {
-        LogEx 'ERRO' "Falha ao ler o login do Telegram portátil: $($_.Exception.Message)" $_
-        $res.Msg = "Não foi possível ler o login do Telegram: $($_.Exception.Message)"
-    }
-    $res
-}
-# Janela "Conectar ao Telegram" (no tema do launcher). Devolve $true quando a conta ficou conectada.
-function TgConnect {
-    $p = TgPaths
-    if (-not $p.TgExe -or -not [IO.File]::Exists($p.TgExe)) {
-        Log 'AVISO' "Telegram portátil não encontrado ($($S.TelegramPath))"
-        [void][Windows.Forms.MessageBox]::Show("O Telegram portátil não foi encontrado em:`n$($S.TelegramPath)", 'Conectar ao Telegram', 'OK', 'Warning'); return $false
-    }
-    $c = $script:Cfg
-    $bg = $(if ($c) { $c.Bg } else { [Drawing.Color]::FromArgb(11, 11, 11) }); $fg = $(if ($c) { $c.Text } else { [Drawing.Color]::White })
-    $ac = $(if ($c) { $c.Accent } else { [Drawing.Color]::FromArgb(30, 144, 255) }); $sub = [Drawing.Color]::FromArgb(154, 154, 154)
-    $pnl = [Drawing.Color]::FromArgb([Math]::Min(255, $bg.R + 18), [Math]::Min(255, $bg.G + 18), [Math]::Min(255, $bg.B + 18))
-    $f = New-Object Windows.Forms.Form -Property @{ ShowIcon = $false; ShowInTaskbar = $false; Text = 'Conectar ao Telegram'; StartPosition = 'CenterParent'; FormBorderStyle = 'FixedDialog'
-        MaximizeBox = $false; MinimizeBox = $false; BackColor = $bg; ForeColor = $fg; Font = (New-Object Drawing.Font('Segoe UI', 10)); ClientSize = (New-Object Drawing.Size(500, 300)) }
-    $tl = Lbl 'Conecte sua conta do Telegram' 24 18 452 30; $tl.Font = New-Object Drawing.Font('Segoe UI Semibold', 14); $tl.ForeColor = $fg
-    $tx = Lbl ("Os jogos são baixados do Telegram com a sua conta. Isso só é feito uma vez:`n`n" +
-               "1.  Clique em ""Abrir Telegram"" e entre na sua conta (pelo QR code no celular ou pelo número de telefone).`n" +
-               "2.  Volte aqui e clique em ""Já entrei"".") 24 56 452 118
-    $tx.ForeColor = $sub
-    $pl = Lbl 'Senha de bloqueio do Telegram:' 24 178 220 24; $pl.ForeColor = $fg; $pl.Visible = $false
-    $pt = New-Object Windows.Forms.TextBox -Property @{ UseSystemPasswordChar = $true; BorderStyle = 'FixedSingle'; BackColor = $pnl; ForeColor = $fg; Visible = $false }; $pt.SetBounds(244, 176, 232, 26)
-    $msg = Lbl '' 24 206 452 40; $msg.ForeColor = [Drawing.Color]::FromArgb(235, 170, 95)
-    $mk = {
-        param($text, $x, [bool]$main)
-        $b = New-Object Windows.Forms.Button -Property @{ Text = $text; FlatStyle = 'Flat'; Cursor = [Windows.Forms.Cursors]::Hand; ForeColor = [Drawing.Color]::White }
-        $b.FlatAppearance.BorderSize = $(if ($main) { 0 } else { 1 }); $b.FlatAppearance.BorderColor = [Drawing.Color]::FromArgb(70, 70, 70)
-        $b.BackColor = $(if ($main) { $ac } else { $pnl }); $b.SetBounds($x, 252, 140, 32); $b
-    }
-    $bo = & $mk 'Abrir Telegram' 24 $true; $bj = & $mk 'Já entrei' 176 $false; $bc = & $mk 'Cancelar' 336 $false
-    $bc.DialogResult = 'Cancel'; $f.CancelButton = $bc
-    $f.Tag = @{ Pt = $pt; Pl = $pl; Msg = $msg; Exe = $p.TgExe }
-    $bo.Add_Click({
-        $tg = $this.FindForm().Tag
-        try {
-            $psi = New-Object Diagnostics.ProcessStartInfo $tg.Exe; $psi.UseShellExecute = $true; $psi.WorkingDirectory = [IO.Path]::GetDirectoryName($tg.Exe)
-            [void][Diagnostics.Process]::Start($psi); Log 'INFO' 'Conectar ao Telegram: Telegram portátil aberto'
-            $tg.Msg.ForeColor = [Drawing.Color]::FromArgb(154, 154, 154); $tg.Msg.Text = 'Depois de entrar na sua conta no Telegram, clique em "Já entrei".'
-        } catch { LogEx 'ERRO' "Não foi possível abrir o Telegram portátil: $($_.Exception.Message)" $_; $tg.Msg.Text = "Não foi possível abrir o Telegram: $($_.Exception.Message)" }
-    })
-    $bj.Add_Click({
-        $fm = $this.FindForm(); $tg = $fm.Tag
-        $fm.Cursor = [Windows.Forms.Cursors]::WaitCursor; $tg.Msg.ForeColor = [Drawing.Color]::FromArgb(154, 154, 154); $tg.Msg.Text = 'Conferindo...'; $fm.Refresh()
-        $r = TgImport $tg.Pt.Text
-        $fm.Cursor = [Windows.Forms.Cursors]::Default
-        if ($r.Ok) { $fm.DialogResult = 'OK'; $fm.Close(); return }
-        $tg.Msg.ForeColor = [Drawing.Color]::FromArgb(235, 170, 95); $tg.Msg.Text = $r.Msg
-        if ($r.NeedPass) { $tg.Pl.Visible = $true; $tg.Pt.Visible = $true; $tg.Pt.SelectAll(); [void]$tg.Pt.Focus() }
-    })
-    $f.Controls.AddRange(@($tl, $tx, $pl, $pt, $msg, $bo, $bj, $bc))
-    $f.Add_Shown({ try { [Dwm]::Dark($this.Handle, ((ColLum $this.BackColor) -lt 128), [int]($this.BackColor.R + 256 * $this.BackColor.G + 65536 * $this.BackColor.B), [int]($this.ForeColor.R + 256 * $this.ForeColor.G + 65536 * $this.ForeColor.B)) } catch { $Error.Clear() } })
-    $ok = ($f.ShowDialog($form) -eq 'OK'); $f.Dispose()
-    if (-not $ok) { Log 'INFO' 'Conectar ao Telegram: cancelado' }
-    $ok
 }
 
 # ---- Extras do jogo (itens a mais no menu do botão direito) ----
@@ -3381,6 +3044,8 @@ public static class ArqTask {
     }
 }
 '@
+Mark 'inicio dos componentes C#'
+EarlySplashSet 'Preparando componentes...'
 # ---- Componentes em C#: compilados UMA vez para TarginoRetroStation\Cache\Compilado\Nucleo_<hash>.dll ----
 #  Nas aberturas seguintes a DLL é só carregada (sem compilar). O <hash> vem do código-fonte: nova versão do launcher = compila de novo
 #  e apaga a DLL antiga. A compilação usa uma pasta temporária DENTRO de TarginoRetroStation\Cache (nada vai para a pasta Temp do Windows, no C:).
@@ -3471,6 +3136,7 @@ $IcoFile = [IO.Path]::Combine($Arq, 'Launcher.ico'); $script:LauncherExe = Launc
 # ID por pasta (hash do caminho): cada cópia do launcher (H:, G:, outra pasta) tem o seu botão e o seu atalho fixado.
 $md5 = [Security.Cryptography.MD5]::Create()
 try { $script:TaskId = 'TarginoRetroStation.Launcher.' + (-join ($md5.ComputeHash([Text.Encoding]::UTF8.GetBytes($Root.ToLowerInvariant())) | Select-Object -First 4 | ForEach-Object { $_.ToString('x2') })) } finally { $md5.Dispose() }
+Mark 'montando a janela principal'; EarlySplashSet 'Montando a janela...'
 $form = New-Object Windows.Forms.Form -Property @{ ShowIcon = $false; Text = 'Launcher'; Size = '1280,760'; StartPosition = 'CenterScreen'; BackColor = $bg; ForeColor = 'White'; KeyPreview = $true; Font = (New-Object Drawing.Font('Segoe UI', 9)) }
 # ShowIcon fica desligado: nada de ícone na barra de título. A barra de tarefas recebe:
 #  (1) o ícone GRANDE da janela (WM_SETICON ICON_BIG, sem o pequeno, que é o do canto superior esquerdo);
@@ -3561,7 +3227,7 @@ $form.Add_KeyDown({ param($sender,$eventArgs)
 function ShowCinemaDetails {
     $gm=Sel; if (-not $gm) { return }
     if($gm.HydraKind -ne 'system' -and (Get-Command ShowHydraDetails -ErrorAction SilentlyContinue)){ShowHydraDetails $gm;return}
-    $dlg=New-Object Windows.Forms.Form -Property @{ Text="Detalhes — $($gm.Name)"; StartPosition='CenterParent'; Size='760,700'; MinimumSize='520,420'; BackColor=[Drawing.Color]::FromArgb(12,16,24); ForeColor=[Drawing.Color]::White; ShowIcon=$false; KeyPreview=$true }
+    $dlg=New-Object Windows.Forms.Form -Property @{ Text=('Detalhes — ' + $gm.Name); StartPosition='CenterParent'; Size='760,700'; MinimumSize='520,420'; BackColor=[Drawing.Color]::FromArgb(12,16,24); ForeColor=[Drawing.Color]::White; ShowIcon=$false; KeyPreview=$true }
     $footer=New-Object Windows.Forms.FlowLayoutPanel -Property @{ Dock='Bottom'; Height=50; Padding='10,8,0,0' }
     $play=New-Object Windows.Forms.Button -Property @{ Text='Jogar'; Width=120; Height=32; DialogResult='OK' }
     $close=New-Object Windows.Forms.Button -Property @{ Text='Fechar'; Width=120; Height=32; DialogResult='Cancel' }
@@ -3682,6 +3348,7 @@ $mainP.Add_Resize({ if ($S.CinemaMode) { $mainP.Invalidate($true) } })
 
 $q = Mk Windows.Forms.TextBox @{ Width = 280; BackColor = $dk; ForeColor = 'White'; BorderStyle = 'FixedSingle'; Margin = '0,0,14,0' } $top
 $btnFil = Mk Windows.Forms.Button @{ Text = 'Biblioteca  ▾'; Width = 170; Height = 24; FlatStyle = 'Flat'; ForeColor = 'White'; BackColor = $dk; TextAlign = 'MiddleCenter'; Padding = '0,0,0,0'; Margin = '0,0,14,0'; TabStop = $false } $top
+$btnTheme = Mk Windows.Forms.Button @{ Text = 'Temas  ▾'; Width = 104; Height = 24; FlatStyle = 'Flat'; ForeColor = 'White'; BackColor = $dk; TextAlign = 'MiddleCenter'; Padding = '0,0,0,0'; Margin = '0,0,14,0'; TabStop = $false } $top
 $btnAdd = Mk Windows.Forms.Button @{ Text = '+ Adicionar  ▾'; Width = 120; Height = 24; FlatStyle = 'Flat'; ForeColor = 'White'; BackColor = $dk; Visible = $false; Margin = '10,0,0,0' } $top
 $btnDev = Mk Windows.Forms.Button @{ Text = 'Personalizar'; Width = 100; Height = 24; FlatStyle = 'Flat'; ForeColor = 'White'; BackColor = $dk; Visible = $false; Margin = '8,0,0,0' } $top
 # ---- Posição dos itens do topo (v2.51.0, aba Topo do modo dev) ----
@@ -3703,17 +3370,19 @@ function TopCenter {
     if (-not $top.IsHandleCreated -or -not $top.Visible) { return }
     $c = $script:Cfg; if (-not $c) { return }
     $tw = $top.ClientSize.Width; $gap = 14; $y = 9
-    $qOn = [bool]$q.Visible; $fOn = [bool]$btnFil.Visible
+    $qOn = [bool]$q.Visible; $fOn = [bool]$btnFil.Visible; $themeOn = [bool]$btnTheme.Visible
     $script:TopLineCx = $null
     if ($c.TopJoin -or -not ($qOn -and $fOn)) {      # bloco único (ou só um dos dois visível): segue as opções da busca (ou dos filtros, se a busca estiver escondida)
-        $bw = $(if ($qOn) { $q.Width } else { 0 }) + $(if ($qOn -and $fOn) { $gap } else { 0 }) + $(if ($fOn) { $btnFil.Width } else { 0 })
+        $bw = $(if ($qOn) { $q.Width } else { 0 }) + $(if ($qOn -and $fOn) { $gap } else { 0 }) + $(if ($fOn) { $btnFil.Width } else { 0 }) + $(if (($qOn -or $fOn) -and $themeOn) { $gap } else { 0 }) + $(if ($themeOn) { $btnTheme.Width } else { 0 })
         if ($qOn) { $bx = TopPlaceX $bw $c.SearchArea $c.SearchAlign $c.SearchOffX $tw } else { $bx = TopPlaceX $bw $c.FilterArea $c.FilterAlign $c.FilterOffX $tw }
         if ($qOn) { $q.Location = New-Object Drawing.Point($bx, $y) }
         if ($fOn) { $btnFil.Location = New-Object Drawing.Point(($bx + $(if ($qOn) { $q.Width + $gap } else { 0 })), $y) }
+        if ($themeOn) { $btnTheme.Location = New-Object Drawing.Point(($bx + $(if ($qOn) { $q.Width + $gap } else { 0 }) + $(if ($fOn) { $btnFil.Width + $gap } else { 0 })), $y) }
         if ($bw -gt 0) { $script:TopLineCx = $bx + $bw / 2.0 }
     } else {
         $qx = TopPlaceX $q.Width $c.SearchArea $c.SearchAlign $c.SearchOffX $tw; $q.Location = New-Object Drawing.Point($qx, $y)
         $fx = TopPlaceX $btnFil.Width $c.FilterArea $c.FilterAlign $c.FilterOffX $tw; $btnFil.Location = New-Object Drawing.Point($fx, $y)
+        if ($themeOn) { $btnTheme.Location = New-Object Drawing.Point([Math]::Min($tw - $btnTheme.Width - 14, $fx + $btnFil.Width + $gap), $y) }
         $script:TopLineCx = $qx + $q.Width / 2.0      # a linha acompanha a busca
     }
     # botões do modo dev: no canto direito
@@ -3830,7 +3499,10 @@ $q.Add_HandleCreated({ try { [CaCue]::Set($q.Handle, "$($S.SearchHint)") } catch
 $top.Add_VisibleChanged({ TopCenter })
 $fm = New-Object Windows.Forms.ContextMenuStrip -Property @{ ShowImageMargin = $false; ShowCheckMargin = $false }
 $script:MenuRend = New-Object DarkMenuRenderer; $fm.Renderer = $script:MenuRend
-$addm = New-Object Windows.Forms.ContextMenuStrip -Property @{ ShowImageMargin = $false; ShowCheckMargin = $false }   # menu do botão '+ Adicionar' (modo dev)
+$themeMenu = New-Object Windows.Forms.ContextMenuStrip -Property @{ ShowImageMargin = $false; ShowCheckMargin = $false }
+$themeMenu.Renderer = $script:MenuRend
+if (Get-Command AddThemeMenuItems -ErrorAction SilentlyContinue) { AddThemeMenuItems $themeMenu }
+$addm = New-Object Windows.Forms.ContextMenuStrip -Property @{ ShowImageMargin = $false; ShowCheckMargin = $false } # menu do botão '+ Adicionar' (modo dev)
 $addm.Renderer = $script:MenuRend
 $zlab = Mk Windows.Forms.Label @{ Text = "$($S.T_Zoom)"; Left = 10; Top = 8; Width = 105; Height = 20 } $bot
 $zm = Mk Windows.Forms.TrackBar @{ Left = 115; Top = 2; Width = 110; TickStyle = 'BottomRight' } $bot
@@ -3845,7 +3517,7 @@ $zm.Value = [Math]::Min(3, [Math]::Max(1, [int]$S.Zoom))      # zoom ao abrir = 
 $lt   = Mk ClearLabel @{ Width = 370; Height = 70; Font = (New-Object Drawing.Font('Segoe UI', 18)); Margin = '0,0,0,8' } $right
 $row  = Mk Windows.Forms.FlowLayoutPanel @{ Width = 375; Height = 46; FlowDirection = 'LeftToRight'; WrapContents = $false; BackColor = $bg; Margin = '0,0,0,6' } $right
 $btnFav = Mk Windows.Forms.Button @{ Text = '☆ Favoritar'; Width = 120; Height = 36; FlatStyle = 'Flat'; ForeColor = 'White'; BackColor = $dk; Margin = '3,0,8,0' } $row
-foreach ($b in $btnFav, $btnAdd, $btnDev, $btnFil) { $b.FlatAppearance.BorderSize = 0 }
+foreach ($b in $btnFav, $btnAdd, $btnDev, $btnFil, $btnTheme) { $b.FlatAppearance.BorderSize = 0 }
 $lst  = Mk ClearLabel @{ Width = 370; Height = 22; ForeColor = [Drawing.Color]::FromArgb(230, 120, 90); Visible = $false; Margin = '0,0,0,4' } $right
 $lver = Mk ClearLabel @{ Width = 370; Height = 22; Margin = '0,0,0,4' } $right
 $ld   = Mk DescBox @{ Width = 365; Height = 130; Margin = '0,0,0,8'; ReadOnly = $true; BorderStyle = 'None'; ScrollBars = 'Vertical'; DetectUrls = $false; TabStop = $false; BackColor = $bg; ForeColor = 'White'; Cursor = 'Default' } $right
@@ -3861,7 +3533,7 @@ function DescAdd($segs, $st, $text) {
     if (-not $text) { return }
     $lk = ''; if ($st.Link.Count) { $lk = $st.Link.Peek() }
     $parts = @($text)
-    if (-not $lk) { $parts = [regex]::Split($text, '(https?://[^\s\[\]<>"'']+)') }
+    if (-not $lk) { $parts = [regex]::Split($text, "(https?://[^\s\[\]<>`"']+)") }
     for ($i = 0; $i -lt $parts.Count; $i++) {
         $pt = $parts[$i]; if (-not $pt) { continue }
         $url = ''
@@ -4264,7 +3936,12 @@ function ThemeApply {
         $bt1.FlatAppearance.BorderSize = 0
         $bt1.FlatAppearance.MouseOverBackColor = (MixCol $c.Side $white 0.12); $bt1.FlatAppearance.MouseDownBackColor = (MixCol $c.Side $white 0.22)
     }
-    $fm.Font = UiFont 9; $cm.Font = UiFont 9; $addm.Font = UiFont 9
+    if ($btnTheme) {
+        $btnTheme.BackColor = $c.Side; $btnTheme.ForeColor = $c.Text
+        $btnTheme.FlatAppearance.BorderSize = 0
+        $btnTheme.FlatAppearance.MouseOverBackColor = (MixCol $c.Side $white 0.12); $btnTheme.FlatAppearance.MouseDownBackColor = (MixCol $c.Side $white 0.22)
+    }
+    $fm.Font = UiFont 9; $cm.Font = UiFont 9; $addm.Font = UiFont 9; if ($themeMenu) { $themeMenu.Font = UiFont 9 }
     ThemeTitle
 }
 # ---- Layout / aparência ----
@@ -5303,7 +4980,7 @@ function Unlock {
 function TextsPanel {
     $keys = @(@('T_Fav','Botão Favoritar'), @('T_Faved','Botão quando já é favorito'), @('T_Link','Link do jogo'), @('T_Version','Rótulo "Versão"'),
               @('T_Zoom','Rótulo da barra de tamanho'), @('T_All','Filtro: todos'), @('T_Favs','Filtro: favoritos'), @('T_Inst','Filtro: instalados'),
-              @('T_NotInst','Filtro: não instalados'), @('T_CtxPlay','Menu: jogar'), @('T_CtxStop','Menu: fechar jogo aberto'), @('T_Starting','Capa: jogo abrindo'), @('T_Running','Capa: jogo em execução'), @('T_Extracting','Capa: jogo sendo extraído'), @('T_Downloading','Capa: jogo sendo baixado'), @('T_CtxCancelDl','Menu: cancelar download'), @('T_CtxFav','Menu: favoritar'), @('T_CtxUnfav','Menu: remover dos favoritos'), @('T_CtxDelete','Menu: deletar jogo'), @('T_Recent','Lista: últimas atualizações (adicionados e atualizados)'), @('T_Empty','Aviso de lista vazia'), @('T_Offline','Aviso de unidade desconectada'), @('T_Archived','Aviso de jogo compactado'))
+              @('T_NotInst','Filtro: não instalados'), @('T_CtxPlay','Menu: jogar'), @('T_CtxStop','Menu: fechar jogo aberto'), @('T_Starting','Capa: jogo abrindo'), @('T_Running','Capa: jogo em execução'), @('T_Extracting','Capa: jogo sendo extraído'), @('T_CtxFav','Menu: favoritar'), @('T_CtxUnfav','Menu: remover dos favoritos'), @('T_CtxDelete','Menu: deletar jogo'), @('T_Recent','Lista: últimas atualizações (adicionados e atualizados)'), @('T_Empty','Aviso de lista vazia'), @('T_Offline','Aviso de unidade desconectada'), @('T_Archived','Aviso de jogo compactado'))
     $f = New-Object Windows.Forms.Form -Property @{ ShowIcon = $false; Text = 'Renomear textos'; StartPosition = 'CenterParent' }
     WinSizable $f 'RenomearTextos' 520 360; $f.ClientSize = New-Object Drawing.Size(640, 600)
     $pn = New-Object Windows.Forms.Panel -Property @{ Dock = 'Fill'; AutoScroll = $true }; $pn.Size = $f.ClientSize
@@ -5409,8 +5086,6 @@ $script:DevSchema = @(
     @{ Tab = 'Biblioteca'; Key = 'SelStyle'; Type = 'combo'; Items = @('Sólida', 'Tracejada'); Label = 'Estilo da borda' }
     @{ Tab = 'Biblioteca'; Key = 'NotInstalled'; Type = 'combo'; Items = @('Preto e branco', 'Escurecida', 'Os dois', 'Nada'); Label = 'Jogo não instalado / indisponível' }
     @{ Tab = 'Compactados'; Key = 'UnrarPath'; Type = 'text'; Label = 'UnRAR.exe (relativo à pasta do launcher)' }
-    @{ Tab = 'Compactados'; Key = 'TdlPath'; Type = 'text'; Label = 'tdl.exe para baixar do Telegram (relativo à pasta do launcher)' }
-    @{ Tab = 'Compactados'; Key = 'TelegramPath'; Type = 'text'; Label = 'Telegram portátil, usado para conectar a conta (relativo à pasta do launcher)' }
     @{ Tab = 'Detalhes'; Key = 'H_Painel'; Type = 'header'; Label = 'Painel' }
     @{ Tab = 'Detalhes'; Key = 'DetailWidth'; Type = 'int'; Min = 260; Max = 800; Label = 'Largura do painel de detalhes (px)' }
     @{ Tab = 'Detalhes'; Key = 'DetailPad'; Type = 'int'; Min = 0; Max = 60; Label = 'Margem interna do painel (px)' }
@@ -5672,9 +5347,8 @@ $cm.Add_Opening({
         return
     }
     $ctxRun = RunFind "$($g.Id)"
-    if ($ctxRun -and $ctxRun.Stage -ne 'dl') { $e.Cancel = $true; return }      # extraindo (v2.48.0): sem menu até terminar ou falhar
+    if ($ctxRun) { $e.Cancel = $true; return }      # extraindo (v2.48.0): sem menu até terminar ou falhar
     foreach ($old in @($cm.Items)) { $old.Dispose() }; $cm.Items.Clear()
-    if ($ctxRun) { AddCtx (PlayText 'T_CtxCancelDl' 'Cancelar download') { $g = $script:CtxGame; if ($g) { TgCancel "$($g.Id)" } }; return }      # baixando (v2.53.0): só "Cancelar download"
     # Jogo aberto (v2.41.0): a ação que está rodando (Jogar ou um extra-programa) vira "Fechar jogo"; as outras ações que abrem
     #  programa ficam cinza (uma de cada vez por jogo). Extras que são pasta/site/documento/.rar continuam disponíveis.
     $ctxPl = $script:Play["$($g.Id)"]; $ctxStop = PlayText 'T_CtxStop' 'Fechar jogo'
@@ -5696,7 +5370,7 @@ $cm.Add_Opening({
     # Favoritar/Remover dos favoritos: sempre no menu do botão direito (ShowFav controla só o botão do painel de detalhes)
     AddCtx $(if ($U.Fav -contains $g.Id) { $S.T_CtxUnfav } else { $S.T_CtxFav }) { $g = $script:CtxGame; if ($g) { ToggleFav $g; Populate; ShowGame (Sel) } }
     AddCtx 'Personalizar launcher...' {ShowTarginoPreferences}
-    if ($S.ShowLink -and $g.Link) { AddCtx $S.T_Link { $g = $script:CtxGame; if ($g -and $g.Link) { GameLinkOpen $g } } }      # link do Telegram: baixa direto para Jogos (v2.53.0)
+    if ($S.ShowLink -and $g.Link) { AddCtx $S.T_Link { $g = $script:CtxGame; if ($g -and $g.Link) { GameLinkOpen $g } } }
     if ($script:Dev) {
         [void]$cm.Items.Add('-')
         AddCtx 'Editar' { $g = $script:CtxGame; if ($g -and (Edit $g)) { CatRefresh; Populate } }
@@ -5774,7 +5448,7 @@ $scrTm.Add_Tick({
 $grid.Add_MouseEnter({ if ((FormActive) -and -not $q.Focused -and -not $script:BigPictureSidebar -and -not $script:BigPictureFocusChanging) { [void]$grid.Focus() } })
 $grid.Add_MouseWheel({ param($snd, $we)
     if ($S.CinemaMode) {
-        if ($script:View.Count) { SelectIdx ([Math]::Max(0,[Math]::Min($script:View.Count-1,$script:CurIdx-[Math]::Sign($we.Delta)))) 'single' }
+        if ($script:View.Count) { SelectIdx ((($script:CurIdx - [Math]::Sign($we.Delta)) % $script:View.Count + $script:View.Count) % $script:View.Count) 'single' }
         return
     }
     $met = $script:Met; if (-not $met) { return }
@@ -5853,7 +5527,7 @@ $grid.Add_KeyDown({ param($snd, $ke)
         }
     }
     if (@('Left', 'Right', 'Up', 'Down', 'Home', 'End', 'PageUp', 'PageDown') -notcontains "$($ke.KeyCode)") { return }
-    $t = [Math]::Max(0, [Math]::Min($n - 1, $t))
+    $t = if ($S.CinemaMode -and $n -gt 0) { (($t % $n) + $n) % $n } else { [Math]::Max(0, [Math]::Min($n - 1, $t)) }
     $mode = 'single'; if ($ke.Shift) { $mode = 'range' }
     SelectIdx $t $mode; EnsureVisible $t; $ke.Handled = $true
 })
@@ -5877,6 +5551,7 @@ $form.Add_KeyDown({ param($snd, $ke)
 
 # --- menu de filtros (ao lado da busca) ---
 $btnFil.Add_Click({ FilterMenuShow })
+$btnTheme.Add_Click({ $themeMenu.Show($btnTheme, 0, $btnTheme.Height) })
 
 # --- painel de detalhes, topo, zoom ---
 $btnFav.Add_Click({ $g = Sel; if ($g) { ToggleFav $g; Populate; ShowGame (Sel) } })
@@ -5911,14 +5586,13 @@ $delTm = New-Object Windows.Forms.Timer -Property @{ Interval = 30 }
 $delTm.Add_Tick({ try { DelTick } catch { LogEx 'ERRO' "Falha ao deletar jogo: $($_.Exception.Message)" $_; $delTm.Stop() } })
 $extTm = New-Object Windows.Forms.Timer -Property @{ Interval = 70 }
 $extTm.Add_Tick({ try { ExtAnim } catch { LogEx 'AVISO' "Falha na animação da extração: $($_.Exception.Message)" $_; $extTm.Stop() } })
+$form.Add_FormClosing({ param($snd, $ce)      # diagnostico (1.5.13): registra QUEM mandou fechar a janela principal
+    try { $who = (Get-PSCallStack | Select-Object -Skip 1 -First 8 | ForEach-Object { "$($_.Command):$($_.ScriptLineNumber)" }) -join ' < '; Log 'AVISO' "Janela principal fechando (motivo: $($ce.CloseReason)) | pilha: $who" } catch { }
+})
 $form.Add_FormClosing({ param($snd, $ce)     # sem mensagem
     foreach ($r2 in @($script:Runs | Where-Object { $_.Stage -eq 'unpack' -and $_.UP })) {      # extração em andamento: interrompe o UnRAR (a pasta temporária é refeita na próxima vez)
         try { if ($r2.UP.Proc -and -not $r2.UP.Proc.Proc.HasExited) { $r2.UP.Proc.Proc.Kill() } } catch { $Error.Clear() }
         Log 'AVISO' "Launcher fechado durante a extração de '$($r2.Name)': extração interrompida"
-    }
-    foreach ($r3 in @($script:Runs | Where-Object { $_.Stage -eq 'dl' -and $_.UP })) {      # download em andamento: interrompe o tdl (o que já terminou fica para a próxima vez)
-        try { if (-not $r3.UP.Proc.HasExited) { $r3.UP.Proc.Kill() } } catch { $Error.Clear() }
-        Log 'AVISO' "Launcher fechado durante o download de '$($r3.Name)': download interrompido"
     }
 })
 $instTm = New-Object Windows.Forms.Timer -Property @{ Interval = 25 }
@@ -5954,6 +5628,7 @@ function SplashOpen {
         $spTr.Controls.Add($spFi); $spF.Controls.AddRange(@($spT, $spL, $spTr))
         $spF.Show(); $spF.Refresh()
         $script:Splash = @{ Form = $spF; L = $spL; Fill = $spFi; Track = $spTr; Sw = [Diagnostics.Stopwatch]::StartNew() }
+        EarlySplashClose      # a tela imediata sai agora, com a "Carregando jogos" ja no mesmo lugar
     } catch { LogEx 'AVISO' "Tela de carregamento não abriu: $($_.Exception.Message)" $_; $script:Splash = $null }
 }
 function SplashSet($spText, $spFrac, $spForce, $spPump = $false) {      # atualiza no máximo a cada ~50 ms (o texto e a barra), mantendo a janelinha respondendo
@@ -6185,7 +5860,7 @@ function JoyDispatch($events,$window) {
                 if ($direction -band 1) { $step=-1 } elseif ($direction -band 2) { $step=1 }
                 elseif ($direction -band 4) { $step=$(if ($S.CinemaMode) {-1} else {-$script:Met.Cols}) }
                 elseif ($direction -band 8) { $step=$(if ($S.CinemaMode) {1} else {$script:Met.Cols}) }
-                $target=[Math]::Max(0,[Math]::Min($script:View.Count-1,$script:CurIdx+$step))
+                $target = if ($S.CinemaMode -and $script:View.Count -gt 0) { ((($script:CurIdx + $step) % $script:View.Count) + $script:View.Count) % $script:View.Count } else { [Math]::Max(0, [Math]::Min($script:View.Count - 1, $script:CurIdx + $step)) }
                 if ($target -ne $script:CurIdx) { [void]$grid.Focus(); SelectIdx $target 'single'; EnsureVisible $target }
             }
         } else {
@@ -6261,6 +5936,7 @@ $form.Add_FormClosed({
 })
 $form.Add_Shown({
     TopCenter
+    Mark 'janela mostrada'
     $lsOn = [bool]$S.LoadScreen; $spOn = $lsOn
     if ($spOn) { SplashOpen }
     if ($spOn) { SplashSet 'Lendo o catálogo...' 0.02 $true }
@@ -6270,10 +5946,11 @@ $form.Add_Shown({
         if ($lsOn) { try { PreloadCovers } catch { LogEx 'AVISO' "Tela de carregamento: falha ao carregar as capas: $($_.Exception.Message)" $_ } }
         try { ImgSaveDisk } catch { LogEx 'AVISO' "Falha ao guardar as capas achadas: $($_.Exception.Message)" $_ }      # próxima abertura não precisa procurar de novo
     } finally {
+        EarlySplashClose      # garante que a tela imediata nunca fica para tras (inclusive com a "Carregando jogos" desligada)
         if ($spOn) { SplashClose; $form.Opacity = 1; $grid.Invalidate(); $form.Activate() }      # agora sim a janela aparece, com as capas prontas
     }
     $script:Ready = $true; [void]$grid.Focus()
-    if ($script:HydraSystemCards) { HydraStartArtwork }
+    if ($script:HydraSystemCards) { $swArt = [Diagnostics.Stopwatch]::StartNew(); HydraStartArtwork; Log 'INFO' "Artes: verificacao em $($swArt.ElapsedMilliseconds) ms" }
     $script:Perf.ReadyMs = $script:T0.ElapsedMilliseconds
     Log 'INFO' "Janela pronta em $($script:Perf.ReadyMs) ms ($(@($script:Games).Count) jogo(s))"
     InstStart      # verificação completa em lotes, em segundo plano (a tela já abriu com o último estado conhecido)

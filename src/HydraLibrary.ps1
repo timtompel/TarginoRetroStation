@@ -44,10 +44,21 @@ function HydraSystemLabel([string]$folder){
     if($script:HydraSystemLookup -and $script:HydraSystemLookup.ContainsKey($folder)){return $script:HydraSystemLookup[$folder].Name}
     return $folder
 }
+# O indice de artes lido do JSON e um objeto com ~1700 campos; procurar uma chave com PSObject.Properties[...] percorre a lista toda
+# a cada consulta (era ~5,8 ms por jogo). Uma tabela de consulta direta, montada uma vez, torna cada busca instantanea.
+function HydraIndexToMap($index){
+    $map=@{}
+    if($index){foreach($property in $index.PSObject.Properties){$map[$property.Name]=$property.Value}}
+    return $map
+}
 function HydraInitializeLibrary {
+    $swInit=[Diagnostics.Stopwatch]::StartNew()
     $script:HydraSystemCards=@();$script:HydraArtItems=@();$script:HydraArtGames=@()
     $titleIndex=$null
     if($DataDir -and (Get-Command ReadJson -ErrorAction SilentlyContinue)){$titleIndex=ReadJson (Join-Path $DataDir 'hydra-midia-indice.json') $false}
+    $titleMap=HydraIndexToMap $titleIndex
+    $script:HydraIndexBoot=$titleMap      # a verificacao das artes, logo depois da abertura, reaproveita esta leitura
+    $readMs=$swInit.ElapsedMilliseconds
     foreach($manifest in $HydraManifests){
         $folder=Split-Path ($manifest.directories.games.Replace('/','\')) -Leaf
         $systemGames=@($script:Games | Where-Object {$_.Version -eq $folder})
@@ -66,8 +77,8 @@ function HydraInitializeLibrary {
             $game.Name=HydraDisplayTitle $game.HydraRawName
             # Recover spacing from already cached cover names only on exact
             # normalized equality; never guess a different title or variant.
-            $entry=if($titleIndex){$titleIndex.PSObject.Properties['game:'+$game.Id]}else{$null}
-            if($entry -and $entry.Value.Source -match '/Named_Boxarts/([^/?]+)'){
+            $entryValue=$titleMap['game:'+$game.Id]
+            if($entryValue -and $entryValue.Source -match '/Named_Boxarts/([^/?]+)'){
                 $cachedTitle=HydraDisplayTitle ([IO.Path]::GetFileNameWithoutExtension([Uri]::UnescapeDataString($Matches[1])))
                 $plain=$game.Name.ToLowerInvariant() -replace '[^\p{L}\p{N}]',''
                 $cachedPlain=$cachedTitle.ToLowerInvariant() -replace '[^\p{L}\p{N}]',''
@@ -84,6 +95,7 @@ function HydraInitializeLibrary {
     $script:HydraSystemLookup=@{}
     foreach($card in $script:HydraSystemCards){$script:HydraSystemLookup[$card.HydraSystem]=$card}
     $script:HydraArtAll=@($script:HydraArtItems)+@($script:HydraArtGames)
+    Log 'INFO' "Biblioteca Hydra: indice de artes lido em $readMs ms; $(@($script:HydraArtGames).Count) jogo(s) preparados em $($swInit.ElapsedMilliseconds) ms no total"
 }
 function HydraGetCover($game){
     if($game.HydraKind -eq 'system'){return (Full $game.Cover)}
@@ -169,11 +181,12 @@ function HydraArtworkRetryDue($entry,[string]$name=''){
 function HydraStartArtwork {
     if($script:HydraArtworkProcess -and -not $script:HydraArtworkProcess.HasExited){return}
     $items=@($script:HydraArtAll | Where-Object {$_})
-    $indexPath=Join-Path $DataDir 'hydra-midia-indice.json';$known=ReadJson $indexPath $false
+    $indexPath=Join-Path $DataDir 'hydra-midia-indice.json'
+    if($null -ne $script:HydraIndexBoot){$known=$script:HydraIndexBoot;$script:HydraIndexBoot=$null}else{$known=HydraIndexToMap (ReadJson $indexPath $false)}
     $complete=$true
     $savedCount=0;$failedCount=0;$notFoundCount=0
     foreach($item in $items){
-        $entry=if($known -and $known.PSObject.Properties[$item.Key]){$known.($item.Key)}else{$null}
+        $entry=$known[$item.Key]
         if(-not $entry -or $entry.StyleVersion -ne (Get-HydraArtworkStyleVersion $entry) -or -not [IO.File]::Exists((Full $item.Path)) -or (HydraArtworkRetryDue $entry $item.Name)){$complete=$false;break}
         switch($entry.Status){'downloaded'{$savedCount++}'error'{$failedCount++}default{$notFoundCount++}}
     }
@@ -191,6 +204,7 @@ function HydraStartArtwork {
     Log 'INFO' 'Processo de artes iniciado em segundo plano'
 }
 function HydraRetryArtwork {
+    $script:HydraIndexBoot=$null
     if($script:HydraArtworkProcess -and -not $script:HydraArtworkProcess.HasExited){return}
     $path=Join-Path $DataDir 'hydra-midia-indice.json';$saved=ReadJson $path $false;$keep=@{}
     if($saved){foreach($property in $saved.PSObject.Properties){if($property.Value.Status -eq 'downloaded'){$keep[$property.Name]=$property.Value}}}

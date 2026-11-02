@@ -35,16 +35,32 @@ function Assert-FrontendPackage([string]$Path,$Manifest){
     $file=Get-Item -LiteralPath $Path
     if($file.Length -ne $Manifest.size -or (Get-TarginoFileSHA256 $Path) -ine $Manifest.sha256){throw 'Pacote incompleto ou adulterado. Instalacao bloqueada.'}
 }
+function Test-FrontendAllowedUri([Uri]$Uri){
+    return ($Uri.Scheme -eq 'https' -and $Uri.IsDefaultPort -and $Uri.Host -in @('api.github.com','github.com','release-assets.githubusercontent.com','objects.githubusercontent.com'))
+}
 function Receive-FrontendFile([string]$Url,[string]$Destination,[long]$Limit,[scriptblock]$Progress,[string]$CancelPath){
     if($CancelPath -and [IO.File]::Exists($CancelPath)){throw [OperationCanceledException]::new('Atualizacao cancelada pelo usuario.')}
     [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12
-    $request=[Net.HttpWebRequest]::Create($Url);$request.UserAgent='TarginoRetroStation-Updater';$request.Timeout=20000;$request.ReadWriteTimeout=30000
-    $request.CachePolicy=New-Object Net.Cache.RequestCachePolicy([Net.Cache.RequestCacheLevel]::NoCacheNoStore)
     $response=$null;$input=$null;$output=$null
     try{
-        $response=$request.GetResponse()
+        # Redirecionamentos sao seguidos manualmente: cada destino e validado ANTES de a conexao ser feita.
+        $current=[Uri]$Url
+        for($hop=0;;$hop++){
+            if($hop -gt 5){throw 'Redirecionamentos demais.'}
+            if(-not (Test-FrontendAllowedUri $current)){throw 'Redirecionamento nao autorizado.'}
+            $request=[Net.HttpWebRequest]::Create($current);$request.UserAgent='TarginoRetroStation-Updater';$request.Timeout=20000;$request.ReadWriteTimeout=30000
+            $request.AllowAutoRedirect=$false
+            $request.CachePolicy=New-Object Net.Cache.RequestCachePolicy([Net.Cache.RequestCacheLevel]::NoCacheNoStore)
+            $response=$request.GetResponse()
+            if([int]$response.StatusCode -in @(301,302,303,307,308)){
+                $location=$response.Headers['Location'];$response.Dispose();$response=$null
+                if(-not $location){throw 'Redirecionamento sem destino.'}
+                $current=New-Object Uri($current,$location)
+                continue
+            }
+            break
+        }
         if($CancelPath -and [IO.File]::Exists($CancelPath)){throw [OperationCanceledException]::new('Atualizacao cancelada pelo usuario.')}
-        if($response.ResponseUri.Scheme -ne 'https' -or $response.ResponseUri.Host -notin @('api.github.com','github.com','release-assets.githubusercontent.com','objects.githubusercontent.com')){throw 'Redirecionamento nao autorizado.'}
         if($response.ContentLength -gt $Limit){throw 'Download excede limite.'}
         $input=$response.GetResponseStream();$output=[IO.File]::Open($Destination,[IO.FileMode]::CreateNew)
         $buffer=New-Object byte[] 65536;$received=0L;$last=[DateTime]::MinValue;$started=[DateTime]::UtcNow
@@ -54,6 +70,7 @@ function Receive-FrontendFile([string]$Url,[string]$Destination,[long]$Limit,[sc
             $output.Write($buffer,0,$count)
             if($Progress -and ([DateTime]::UtcNow-$last).TotalMilliseconds -gt 250){& $Progress $received $response.ContentLength;$last=[DateTime]::UtcNow}
         }
+        if($Progress){& $Progress $received $response.ContentLength}
         if($CancelPath -and [IO.File]::Exists($CancelPath)){throw [OperationCanceledException]::new('Atualizacao cancelada pelo usuario.')}
     }finally{if($output){$output.Dispose()};if($input){$input.Dispose()};if($response){$response.Dispose()}}
 }

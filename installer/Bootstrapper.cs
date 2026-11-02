@@ -8,8 +8,8 @@ using System.Web.Script.Serialization;
 
 [assembly: AssemblyTitle("Targino RetroStation - Instalador Web")]
 [assembly: AssemblyProduct("TarginoRetroStation")]
-[assembly: AssemblyVersion("1.5.4.0")]
-[assembly: AssemblyInformationalVersion("1.5.4")]
+[assembly: AssemblyVersion("1.5.19.0")]
+[assembly: AssemblyInformationalVersion("1.5.19")]
 public sealed class Bootstrapper : Form
 {
     Label status; ProgressBar progress; Button start,cancel; Timer timer;

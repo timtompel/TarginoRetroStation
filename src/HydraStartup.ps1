@@ -15,16 +15,22 @@ function HydraRendererInput([string]$key,$dialog){
     [void]$state.Buttons[$state.Index].Focus()
 }
 function HydraCreateRendererDialog([string]$gameName,[string]$previous,[string]$system='ps2'){
-    $dialog=New-Object Windows.Forms.Form -Property @{Text='PS2 - Como quer rodar?';StartPosition='CenterParent';ClientSize='600,370';FormBorderStyle='FixedDialog';MaximizeBox=$false;MinimizeBox=$false;ShowInTaskbar=$false;KeyPreview=$true;BackColor=[Drawing.Color]::FromArgb(13,18,28);ForeColor=[Drawing.Color]::White;Font=(New-Object Drawing.Font('Segoe UI',11))}
-    $title=New-Object Windows.Forms.Label -Property @{Text='Como quer rodar este jogo de PS2?';Left=25;Top=20;Width=550;Height=35;Font=(New-Object Drawing.Font('Segoe UI',16,[Drawing.FontStyle]::Bold))}
+    $sysLabel=switch($system){'n64'{'Nintendo 64'}'gamecube'{'GameCube'}'neogeo'{'Neo Geo'}default{'PS2'}}
+    $dialog=New-Object Windows.Forms.Form -Property @{Text="$sysLabel - Selecione o Motor de Execucao";StartPosition='CenterParent';ClientSize='600,370';FormBorderStyle='FixedDialog';MaximizeBox=$false;MinimizeBox=$false;ShowInTaskbar=$false;KeyPreview=$true;BackColor=[Drawing.Color]::FromArgb(13,18,28);ForeColor=[Drawing.Color]::White;Font=(New-Object Drawing.Font('Segoe UI',11))}
+    $title=New-Object Windows.Forms.Label -Property @{Text="Como deseja executar este jogo de $sysLabel?";Left=25;Top=20;Width=550;Height=35;Font=(New-Object Drawing.Font('Segoe UI',16,[Drawing.FontStyle]::Bold))}
     $name=New-Object Windows.Forms.Label -Property @{Text=$gameName;Left=27;Top=62;Width=545;Height=28;AutoEllipsis=$true}
     $hint=New-Object Windows.Forms.Label -Property @{Text='Direcional: escolher   A / Start / Enter: jogar   B / Esc: cancelar';Left=26;Top=326;Width=550;Height=30;ForeColor=[Drawing.Color]::Silver;Font=(New-Object Drawing.Font('Segoe UI',9))}
     $dialog.Controls.AddRange(@($title,$name,$hint))
+    
     $values=@('software','hardware','opengl');$labels=@('Software','Vulkan','OpenGL')
-    if($system -eq 'neogeo'){
+    if($system -eq 'gamecube'){
+        $values=@('dolphin','hydra')
+        $labels=@('Dolphin Integrado (DirectX 11 - Recomendado)','Hydra Core (Vulkan - Nativo)')
+    } elseif($system -eq 'neogeo'){
         $values=@('aes','mvs');$labels=@('Console (AES)','Arcade (MVS)')
         $dialog.Text='Neo Geo - Como quer jogar?';$title.Text='Como quer jogar este jogo de Neo Geo?'
     }
+    
     $dialog.ClientSize=New-Object Drawing.Size(600,(157+71*$values.Count))
     $hint.Top=113+71*$values.Count
     $index=[Array]::IndexOf($values,$previous);if($index -lt 0){$index=0}
@@ -47,16 +53,15 @@ function HydraCreateRendererDialog([string]$gameName,[string]$previous,[string]$
 function HydraChooseStartupOption($game,[string]$system){
     $path=Join-Path $DataDir 'hydra-inicializacao.json'
     $saved=ReadJson $path $false
-    $key=if($system -eq 'ps2'){'PS2Renderer'}else{'NeoGeoMode'}
+    $key=switch($system){'ps2'{'PS2Renderer'}'n64'{'N64Renderer'}'gamecube'{'GameCubeEngine'}default{'NeoGeoMode'}}
     $previous=if($saved -and $saved.PSObject.Properties[$key]){[string]$saved.$key}else{''}
     $dialog=HydraCreateRendererDialog $game.Name $previous $system
     $script:HydraRendererDialog=$dialog
     try{
         if($dialog.ShowDialog($form) -ne 'OK'){return $null}
         $choice=[string]$dialog.Tag.Choice
-        # Only remember focus, never skip the question or modify emulator settings.
         $preferences=@{}
-        foreach($field in @('PS2Renderer','NeoGeoMode')){if($saved -and $saved.PSObject.Properties[$field]){$preferences[$field]=[string]$saved.$field}}
+        foreach($field in @('PS2Renderer','N64Renderer','GameCubeEngine','NeoGeoMode')){if($saved -and $saved.PSObject.Properties[$field]){$preferences[$field]=[string]$saved.$field}}
         $preferences[$key]=$choice
         [void](WriteJson $path $preferences 3)
         return $choice
@@ -67,34 +72,60 @@ function HydraGetLaunchPlan($game,[string]$exe) {
     if([IO.Path]::GetFileName($exe) -ine 'hydra.exe'){return @{Mode='direct';Arguments=$arguments}}
     $systemId=[string]$game.HydraSystemId
     if(-not $systemId -and $arguments -match '^--boot\s+([a-z0-9]+)\s+'){ $systemId=$Matches[1] }
-    if($systemId -notin @('ps2','neogeo')){return @{Mode='direct';Arguments=$arguments}}
+    if($systemId -notin @('ps2','neogeo','gamecube')){return @{Mode='direct';Arguments=$arguments}}
     if($arguments -notmatch '^--boot\s+(?<system>[a-z0-9]+)\s+"(?<rom>[^"\r\n]+)"\s*$'){throw 'Comando da ROM invalido para abertura direta.'}
     $rom=$Matches['rom'];$argumentSystem=$Matches['system']
     if($argumentSystem -ne $systemId){throw 'O sistema do jogo nao corresponde ao comando da ROM.'}
-    # Neo Geo CD does not use cartridge AES/MVS options.
     if($systemId -eq 'neogeo' -and [IO.Path]::GetExtension($rom) -ine '.neo'){return @{Mode='direct';Arguments=$arguments}}
     return @{Mode='bridge-choice';Arguments=$arguments;System=$systemId;Rom=$rom}
 }
 function HydraLoadDirectBridge {
     if(-not ('HydraDirectBridge' -as [type])){
         $dll=Join-Path $Arq 'HydraDirectBridge.dll'
-        if(-not [IO.File]::Exists($dll)){throw 'Adaptador de abertura direta ausente. Reinstale o TarginoRetroStation.'}
-        Add-Type -Path $dll -ErrorAction Stop
+        if([IO.File]::Exists($dll)){
+            Add-Type -Path $dll -ErrorAction Stop
+        } else {
+            $cs=Join-Path $Arq 'HydraDirectBridge.cs'
+            Add-Type -Path $cs -ReferencedAssemblies System.Web.Extensions -ErrorAction Stop
+        }
     }
 }
 function HydraExitMessage($entry,[int]$code){
     $hex='0x'+([BitConverter]::ToUInt32([BitConverter]::GetBytes($code),0)).ToString('X8')
     $system=[string]$entry.Game.HydraSystemId
-    $text="O Hydra encerrou com erro durante a execucao ou o fechamento de '$($entry.Name)'.`r`nCodigo: $code ($hex)."
-    if($code -eq -1073741819){$text+="`r`nViolacao de acesso a memoria. Esse codigo, sozinho, nao identifica a causa nem comprova ROM ou BIOS defeituosa."}
-    if($system -eq 'n64'){$text+="`r`nSistema: Nintendo 64. Esta configuracao usa Mupen64Plus-Next/ParaLLEl com Vulkan. Compare o mesmo jogo pelo menu original do Hydra e observe se o erro ocorre ao iniciar ou ao fechar."}
-    elseif($system -eq 'ps2'){$text+="`r`nSistema: PlayStation 2. Confira a opcao de renderizacao escolhida e teste diretamente no Hydra."}
+    $text="O emulador encerrou durante a execucao de '$($entry.Name)'.`r`nCodigo: $code ($hex)."
+    if($system -eq 'gamecube'){$text+="`r`nSistema: GameCube. Caso o motor Hydra falhe neste computador, selecione 'Dolphin Integrado (DirectX 11)' ao iniciar o jogo."}
+    elseif($system -eq 'ps2'){$text+="`r`nSistema: PlayStation 2. Confira a opcao de renderizacao escolhida."}
     $text+="`r`nConsulte TarginoRetroStation\Logs\launcher.log."
     return $text
 }
 function HydraPrepareLaunch($game,[string]$exe) {
     $plan=HydraGetLaunchPlan $game $exe
     if($plan.Mode -eq 'direct'){return $plan}
+    if($plan.System -eq 'gamecube'){
+        $choice=HydraChooseStartupOption $game 'gamecube'
+        if(-not $choice){return $null}
+        if($choice -eq 'dolphin'){
+            $standalonePaths = @(
+                (Join-Path $PSScriptRoot 'Emuladores\Dolphin-x64\Dolphin.exe'),
+                'D:\Games\Dolphin-x64\Dolphin.exe',
+                (Join-Path $HydraRoot 'emuladores\Dolphin-x64\Dolphin.exe'),
+                'C:\Program Files\Dolphin\Dolphin.exe'
+            )
+            foreach($candidate in $standalonePaths){
+                if([IO.File]::Exists($candidate)){
+                    $plan.Exe = $candidate
+                    $plan.Arguments = "-b -e `"$($plan.Rom)`""
+                    $plan.Mode = 'direct'
+                    Log 'INFO' "GameCube redirecionado para Dolphin Integrado (DirectX 11): $candidate"
+                    return $plan
+                }
+            }
+            Log 'AVISO' 'Dolphin Integrado nao encontrado nas pastas relativas; usando Hydra padrao.'
+        }
+        $plan.Mode = 'direct'
+        return $plan
+    }
     HydraLoadDirectBridge
     $reason=[HydraDirectBridge]::GetCompatibilityReason($exe,[string]$plan.System)
     if($reason){return (HydraOfferNativeMenu $plan $reason)}
@@ -104,14 +135,9 @@ function HydraPrepareLaunch($game,[string]$exe) {
     return $plan
 }
 function HydraOfferNativeMenu($plan,[string]$reason){
-    Log 'AVISO' ('Abertura direta indisponivel: '+$reason)
-    $text="Este Hydra tem uma estrutura diferente da reconhecida para abertura direta. Nenhum ajuste sera aplicado.`r`n`r`nDeseja abrir o Hydra normalmente? Nesse modo, escolha o jogo e as opcoes dentro dele."
-    $answer=[Windows.Forms.MessageBox]::Show($form,$text,'Abrir pelo Hydra',[Windows.Forms.MessageBoxButtons]::YesNo,[Windows.Forms.MessageBoxIcon]::Information)
-    return (HydraNativeFallbackPlan $plan ($answer -eq [Windows.Forms.DialogResult]::Yes))
-}
-function HydraNativeFallbackPlan($plan,[bool]$accepted){
-    if(-not $accepted){return $null}
-    return @{Mode='direct';Arguments='';System=$plan.System;NativeMenu=$true}
+    Log 'AVISO' ('Motor nao reconhecido para abertura direta: '+$reason)
+    [void][Windows.Forms.MessageBox]::Show($form,'Este motor nao foi reconhecido para abertura direta. Configure o motor antes de jogar.','Targino RetroStation - Motor')
+    return $null
 }
 function HydraStartDirectProcess([string]$exe,$plan){
     Log 'INFO' ("Abertura direta '$($plan.System)' / '$($plan.Choice)': $($plan.Arguments); sem navegacao simulada")

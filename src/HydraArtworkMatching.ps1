@@ -29,9 +29,9 @@ function ConvertTo-HydraArtworkCatalogue([string]$html,[string]$url){
     if(-not $exact.Count){throw 'Indice de capas vazio ou invalido; nao e uma ausencia de correspondencia do jogo.'}
     return @{Exact=$exact;Normalized=$normalized}
 }
-function Get-HydraArtworkAlias([string]$systemId,[string]$name){
-    $key=Normalize-HydraArtworkTitle $name
-    $aliases=@{
+# Aliases embutidos (sistema|titulo normalizado -> nome no indice Libretro).
+# Montados uma unica vez ao carregar o modulo, nao a cada jogo consultado.
+$script:HydraArtworkBuiltInAliases=@{
         'sms|columns'='Columns _ Shapes and Columns';
         'sms|eswatcityundersiege'='E-SWAT';
         'sms|summergames'='Summer Games _ Jogos Olimpicos';
@@ -66,11 +66,45 @@ function Get-HydraArtworkAlias([string]$systemId,[string]$name){
         'snes|soreyukeebisumarumechanicalmazemysteryofmissinggoemon'='Soreyuke Ebisumaru Karakuri Meiro - Kieta Goemon no Nazo!!';
         'nes|simpsonsbartvsspacemutants'='Simpsons, The - Bart vs. the Space Mutants';
         'nes|addams'='Addams Family, The'
+}
+# Aliases extras do usuario (Dados\hydra-capas-aliases.json). Formato:
+# { "snes": { "Nome do jogo na biblioteca": "Nome exato no Libretro" }, "nes": { ... } }
+# Valores vazios sao ignorados. Os do usuario tem prioridade sobre os embutidos.
+$script:HydraArtworkUserAliases=@{}
+$script:HydraArtworkUserAliasError=''
+function Import-HydraArtworkUserAliases([string]$Path){
+    $script:HydraArtworkUserAliases=@{};$script:HydraArtworkUserAliasError=''
+    if(-not $Path -or -not [IO.File]::Exists($Path)){return 0}
+    try{
+        if((Get-Item -LiteralPath $Path).Length -gt 1MB){throw 'Arquivo de aliases excede 1 MB.'}
+        $json=[IO.File]::ReadAllText($Path)|ConvertFrom-Json
+        $loaded=@{}
+        foreach($system in @($json.PSObject.Properties)){
+            $systemId=([string]$system.Name).Trim().ToLowerInvariant()
+            if(-not $systemId -or $system.Value -isnot [pscustomobject]){continue}
+            foreach($pair in @($system.Value.PSObject.Properties)){
+                $target=[string]$pair.Value
+                if($pair.Value -isnot [string] -or -not $target.Trim()){continue}
+                $key=Normalize-HydraArtworkTitle $pair.Name
+                if($key){$loaded[$systemId+'|'+$key]=$target.Trim()}
+            }
+        }
+        $script:HydraArtworkUserAliases=$loaded
+        return $loaded.Count
+    }catch{
+        $script:HydraArtworkUserAliasError=$_.Exception.Message
+        $script:HydraArtworkUserAliases=@{}
+        return 0
     }
+}
+function Get-HydraArtworkAlias([string]$systemId,[string]$name){
+    $key=Normalize-HydraArtworkTitle $name
     if($systemId -eq 'nes' -and $name -match '^Simpsons_PT-BR_v\d+_DEBUG_Fase_[1-5]_(?:Springfield|Shopping|Krustyland|Museu|Usina)$'){
         return 'Simpsons, The - Bart vs. the Space Mutants'
     }
-    return $aliases[($systemId+'|'+$key)]
+    $id=$systemId+'|'+$key
+    if($script:HydraArtworkUserAliases.ContainsKey($id)){return $script:HydraArtworkUserAliases[$id]}
+    return $script:HydraArtworkBuiltInAliases[$id]
 }
 function Find-HydraArtworkCandidate($catalogue,[string]$name,[string]$systemId=''){
     $filename=(Get-HydraArtworkQueryTitle $name)+'.png'
