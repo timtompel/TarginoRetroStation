@@ -1,4 +1,4 @@
-param([string]$Root,[string]$Installed,[string]$Job,[int]$LauncherPid,[switch]$Automatic)
+﻿param([string]$Root,[string]$Installed,[string]$Job,[int]$LauncherPid,[switch]$Automatic)
 $ErrorActionPreference='Stop'
 Add-Type -AssemblyName System.Windows.Forms
 . (Join-Path $PSScriptRoot 'FrontendUpdate.ps1')

@@ -1,4 +1,5 @@
-﻿// Native-code-profile-gated direct launch adapter. Only our new process is modified.
+// Native-code-profile-gated direct launch adapter. Only our new process is modified.
+// No native executable, core, ROM or emulator configuration is edited on disk.
 using System;
 using System.IO;
 using System.Text;
@@ -11,7 +12,7 @@ using System.Collections.Generic;
 using System.Web.Script.Serialization;
 public static class HydraDirectBridge {
     public const string SupportedHash="5C29156BB7907FD793E29923E30A73663BA7C30729AF88228D041C4A91A49BAA";
-    public const string AdapterVersion="1.5.18-ogl";
+    public const string AdapterVersion="1.5.21-ogl";
     const string SupportedCodeHash="0DE3F8DC41015CBECAF429CD378C5A0D553DBFA9B4C7C7CA2EC4CB2C3550F95E";
     const string OfficialCodeHash="C7CC95ED017F2F42FF9E0DCEBF9B93E3A0EA55FD494472203335A409E40EFD48";
     public sealed class Patch {public uint Rva;public byte[] Before,After;public bool Code;}
@@ -154,6 +155,15 @@ public static class HydraDirectBridge {
     public static Plan Prepare(string exe,string system,string choice){
         if(IntPtr.Size!=8)throw new Exception("A abertura direta requer o launcher de 64 bits.");
         if(system!="ps2"&&system!="neogeo"&&system!="n64"&&system!="gamecube"&&system!="dreamcast")throw new ArgumentException("Sistema nao suportado pelo adaptador direto.");
+        string renderer=null;
+        if(system=="ps2"){
+            renderer=choice=="software"?"Software (HW)":choice=="hardware"||choice=="vulkan"?"Vulkan":choice=="opengl"?"OpenGL":null;
+            if(renderer==null)throw new ArgumentException("Renderizador invalido.");
+        }else if(system=="neogeo"){
+            if(choice!="aes"&&choice!="mvs")throw new ArgumentException("Modo Neo Geo invalido.");
+        }else{
+            if(choice!="opengl"&&choice!="vulkan"&&choice!="hardware"&&choice!="software")throw new ArgumentException("Renderizador invalido.");
+        }
         byte[] data=File.ReadAllBytes(exe);
         uint startupRva=LocateStartup(data);
         Match manifest=null;
@@ -165,46 +175,38 @@ public static class HydraDirectBridge {
         if(manifest==null)throw new Exception("Manifesto do sistema nao encontrado.");
         byte[] before=new byte[manifest.Length];Buffer.BlockCopy(data,manifest.Index,before,0,before.Length);
         var parsed=Json.Deserialize<Dictionary<string,object>>(Encoding.UTF8.GetString(before));
-        var defaults=parsed.ContainsKey("defaults") ? (parsed["defaults"] as Dictionary<string,object>) : null;
+        string expectedLibrary=system=="ps2"?"pcsx2_libretro.dll":system=="neogeo"?"geolith_libretro.dll":system=="n64"?"mupen64plus_next_libretro.dll":system=="gamecube"?"dolphin_libretro.dll":"flycast_libretro.dll";
+        string expectedPrefix=system=="ps2"?"pcsx2":system=="neogeo"?"geolith":system=="n64"?"mupen64plus-next":system=="gamecube"?"dolphin":"flycast";
+        if(!parsed.ContainsKey("library")||!parsed.ContainsKey("backend")||(string)parsed["library"]!=expectedLibrary||(string)parsed["backend"]!="core")throw new Exception("Estrutura do core diferente da estrutura validada.");
+        var defaults=parsed["defaults"] as Dictionary<string,object>;
         if(defaults==null)throw new Exception("Padroes de core invalidos.");
-        if(system=="gamecube"){
-            defaults["renderer"]="Hardware";
-            defaults["skip_gc_bios"]="enabled";
-            defaults["shader_compilation_mode"]="0";
-            defaults["fastmem"]="disabled";
-            if(parsed.ContainsKey("core_options_hide")) parsed["core_options_hide"]=new string[0];
-            parsed["requires"]=""; // Forca o Hydra a abrir em contexto OpenGL
-        } else if(system=="ps2"){
-            string renderer=choice=="software"?"Software (HW)":choice=="opengl"?"OpenGL":"Vulkan";
+        if(system=="ps2"){
             defaults["renderer"]=renderer;
-            if(choice!="vulkan"&&choice!="hardware")parsed["requires"]="";
-        } else if(system=="n64"){
-            if(choice=="software"){
-                defaults["gfx_plugin"]="angrylion";
-                defaults["rsp_plugin"]="cxd4";
-                defaults["rdp_plugin"]="angrylion";
-                parsed["requires"]="";
-            } else if(choice=="opengl"){
-                defaults["gfx_plugin"]="gliden64";
-                defaults["rsp_plugin"]="hle";
-                defaults["rdp_plugin"]="gliden64";
-                parsed["requires"]="";
-            } else if(choice=="vulkan"||choice=="hardware"){
-                defaults["gfx_plugin"]="parallel";
-                defaults["rsp_plugin"]="parallel";
-                defaults["rdp_plugin"]="parallel";
-            } else throw new ArgumentException("Renderizador N64 invalido.");
-        } else if(system=="dreamcast"){
             if(choice!="hardware"&&choice!="vulkan")parsed["requires"]="";
-        } else {
-            if(choice!="aes"&&choice!="mvs")throw new ArgumentException("Modo Neo Geo invalido.");
+        }else if(system=="n64"){
+            if(choice!="hardware"&&choice!="vulkan"){
+                parsed["libretro"]="mupen64plus";
+                defaults["rdp-plugin"]="angrylion";
+                defaults["rsp-plugin"]="hle";
+                parsed["requires"]="";
+            }
+        }else if(system=="gamecube"){
+            defaults["renderer"]=choice=="software"?"Software":"Hardware";
+            if(choice!="hardware"&&choice!="vulkan")parsed["requires"]="";
+        }else if(system=="dreamcast"){
+            if(choice!="hardware"&&choice!="vulkan"){
+                defaults["hle_bios"]="enabled";
+                defaults["alpha_sorting"]="per-triangle (normal)";
+                defaults["threaded_rendering"]="disabled";
+                defaults["native_depth_interpolation"]="disabled";
+                defaults["detect_vsync_swap_interval"]="disabled";
+                defaults["internal_resolution"]="640x480";
+                parsed["requires"]="";
+            }
+        }else{
             defaults["system_type"]=choice;defaults["unibios_hw"]=choice;
         }
         byte[] compact=Encoding.UTF8.GetBytes(Json.Serialize(parsed));
-        if(compact.Length>before.Length && parsed.ContainsKey("core_options_hide")){
-            parsed["core_options_hide"]=new string[0];
-            compact=Encoding.UTF8.GetBytes(Json.Serialize(parsed));
-        }
         if(compact.Length>before.Length)throw new Exception("Nao ha espaco reservado para as opcoes do core.");
         byte[] after=new byte[before.Length];for(int i=0;i<after.Length;i++)after[i]=32;Buffer.BlockCopy(compact,0,after,0,compact.Length);
         Json.DeserializeObject(Encoding.UTF8.GetString(after));

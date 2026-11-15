@@ -1,4 +1,4 @@
-function Receive-HydraMedia([string]$Url,[string]$Destination){
+﻿function Receive-HydraMedia([string]$Url,[string]$Destination){
     $uri=$null
     if(-not [Uri]::TryCreate($Url,[UriKind]::Absolute,[ref]$uri) -or $uri.Scheme -ne 'https' -or $uri.UserInfo -or $Url.IndexOfAny([char[]]@('"',"`r","`n")) -ge 0){throw 'Endereco de midia invalido.'}
     if([IO.File]::Exists($Destination)){return}

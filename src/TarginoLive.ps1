@@ -1,4 +1,4 @@
-﻿# Optional window geometry profile. Does not change Hydra settings or emulator resolution.
+# Optional window geometry profile. Does not change Hydra settings or emulator resolution.
 $script:HydraLivePrefs=@{Enabled=$false;Width=1280;Height=720;Center=$true;X=0;Y=0;AutoRemember=$true;AspectMode='manual'}
 $script:HydraLiveRevision=0
 $liveSaved=ReadJson (Join-Path $DataDir 'hydra-live.json') $false
@@ -13,7 +13,9 @@ function HydraLiveLoad {
     if(-not ('TarginoLiveWindow' -as [type])){Add-Type -Path (Join-Path $Arq 'TarginoLiveWindow.cs') -ReferencedAssemblies System.Windows.Forms,System.Drawing}
 }
 function HydraLiveTick($entry){
-    if(-not $entry.Hydra -or -not $entry.Proc){return}
+    if(((-not $entry.Hydra) -and (-not $entry.LiveWindow)) -or -not $entry.Proc){return}
+    $sys = if ($entry.Game.HydraSystemId) { [string]$entry.Game.HydraSystemId } elseif ($entry.Game.Args -match '--boot\s+([a-z0-9]+)') { $Matches[1] } else { '' }
+    if ($entry.Hydra -and $sys -in @('dreamcast','gamecube')) { return }
     try{
         if(-not $script:HydraLivePrefs.Enabled){if('TarginoLiveWindow' -as [type]){[TarginoLiveWindow]::StopWatching($entry.Proc.Id)};return}
         HydraLiveLoad
@@ -25,7 +27,14 @@ function HydraLiveTick($entry){
         if($script:HydraLivePrefs.AutoRemember){
             if(-not [TarginoLiveWindow]::StartWatching($handle,$entry.Proc.Id) -and -not $entry.LiveWatchError){Log 'AVISO' 'Windows nao permitiu observar o ajuste manual da janela do Hydra.';$entry.LiveWatchError=$true}
         }else{[TarginoLiveWindow]::StopWatching($entry.Proc.Id)}
-        if($entry.LiveInitialized){HydraLiveObserve $entry;return}
+        if($entry.LiveInitialized){
+            if($entry.LiveWindow -and -not $entry.Hydra -and -not [TarginoLiveWindow]::IsSizing($handle)){
+                $p=$script:HydraLivePrefs;$dimensions=HydraLiveDimensions $p
+                $status=[TarginoLiveWindow]::Apply($handle,$entry.Proc.Id,[int]$dimensions.Width,[int]$dimensions.Height,[bool]$p.Center,[int]$p.X,[int]$p.Y)
+                if($status -notin @('unchanged','not-visible') -and $entry.LiveStatus -ne $status){Log 'INFO' ('Perfil RetroArch reaplicado: '+$status+'; area cliente '+$dimensions.Width+'x'+$dimensions.Height);$entry.LiveStatus=$status}
+            }
+            HydraLiveObserve $entry;return
+        }
         if((-not $entry.CoreSeen -and $entry.Start -and ((Get-Date)-$entry.Start).TotalSeconds -lt 2) -or [TarginoLiveWindow]::IsSizing($handle)){return}
         if($entry.LiveAttempts -ge 8){return}
         $p=$script:HydraLivePrefs

@@ -1,4 +1,45 @@
-﻿# Direct native launch; no simulated buttons or library-position-dependent sequences.
+# Direct native launch; no simulated buttons or external standalone emulators.
+function HydraRetroArchQuote([string]$text){
+    '"' + ("$text" -replace '(\\*)"','$1$1\"' -replace '(\\+)$','$1$1') + '"'
+}
+function HydraRetroArchFallbackPlan($plan){
+    $coreBySystem=@{ '3do'='opera_libretro.dll';'arcade'='fbneo_libretro.dll';'atari2600'='stella_libretro.dll';'dreamcast'='flycast_libretro.dll';'gameboy'='mgba_libretro.dll';'gameboycolor'='mgba_libretro.dll';'gamegear'='genesis_plus_gx_libretro.dll';'gba'='mgba_libretro.dll';'genesis'='genesis_plus_gx_libretro.dll';'megacd'='genesis_plus_gx_libretro.dll';'n64'='mupen64plus_next_libretro.dll';'neogeo'='geolith_libretro.dll';'nes'='mesen_libretro.dll';'pce'='mednafen_pce_libretro.dll';'ps2'='pcsx2_libretro.dll';'psx'='swanstation_libretro.dll';'saturn'='mednafen_saturn_libretro.dll';'sms'='gearsystem_libretro.dll';'snes'='snes9x_libretro.dll';'gamecube'='dolphin_libretro.dll' }
+    if(-not $coreBySystem.ContainsKey([string]$plan.System)){return $null}
+    $cfgPath=Join-Path $DataDir 'retroarch-fallback.json';$cfg=ReadJson $cfgPath $false
+    if(-not $cfg -or -not $cfg.Enabled){return $null}
+    $fallbackExe=[string]$cfg.Exe
+    if(-not $fallbackExe){$fallbackExe='D:\TarginoRetrobat\Retro\emulators\retroarch\retroarch.exe'}
+    try{$fallbackExe=[IO.Path]::GetFullPath($fallbackExe)}catch{return $null}
+    if(-not [IO.File]::Exists($fallbackExe)){Log 'AVISO' ('Fallback RetroArch configurado, mas o executavel nao foi encontrado: '+$fallbackExe);return $null}
+    $coreName=$coreBySystem[[string]$plan.System]
+    $core=[string]$cfg.Cores.([string]$plan.System)
+    if(-not $core -and $plan.System -eq 'gamecube'){$core=[string]$cfg.dolphin_libretro_dll}
+    if(-not $core -and $plan.System -eq 'dreamcast'){$core=[string]$cfg.flycast_libretro_dll}
+    if(-not $core){$core=Join-Path ([IO.Path]::GetDirectoryName($fallbackExe)) ('cores\'+$coreName)}
+    try{$core=[IO.Path]::GetFullPath($core)}catch{return $null}
+    if(-not [IO.File]::Exists($core)){Log 'AVISO' ('Fallback RetroArch sem core '+$coreName+': '+$core);return $null}
+    $rom=[IO.Path]::GetFullPath([string]$plan.Rom)
+    if(-not [IO.File]::Exists($rom)){return $null}
+    $cfgFile=Join-Path ([IO.Path]::GetDirectoryName($fallbackExe)) 'retroarch.cfg'
+    $cfgArg=if([IO.File]::Exists($cfgFile)){('-c '+(HydraRetroArchQuote $cfgFile)+' ')}else{''}
+    $screenArg=''
+    try{
+        $prefs=$script:HydraLivePrefs
+        if($prefs -and $prefs.Enabled){
+            $dimensions=if(Get-Command HydraLiveDimensions -ErrorAction SilentlyContinue){HydraLiveDimensions $prefs}else{@{Width=[int]$prefs.Width;Height=[int]$prefs.Height}}
+            $x=[int]$prefs.X;$y=[int]$prefs.Y
+            if($prefs.Center){$wa=[Windows.Forms.Screen]::PrimaryScreen.WorkingArea;$x=[int](($wa.Width-$dimensions.Width)/2+$wa.X);$y=[int](($wa.Height-$dimensions.Height)/2+$wa.Y)}
+            $override=Join-Path $DataDir 'retroarch-window-overrides.cfg'
+            $lines=@('video_fullscreen = "false"','video_windowed_fullscreen = "false"','video_window_custom_size_enable = "true"','video_window_save_positions = "false"',('video_windowed_position_width = "'+[int]$dimensions.Width+'"'),('video_windowed_position_height = "'+[int]$dimensions.Height+'"'),('video_windowed_position_x = "'+$x+'"'),('video_windowed_position_y = "'+$y+'"'))
+            [IO.File]::WriteAllLines($override,$lines,(New-Object Text.UTF8Encoding($false)))
+            $screenArg='--appendconfig='+ (HydraRetroArchQuote $override)+' '
+            Log 'INFO' ("Perfil de janela aplicado ao RetroArch: $($dimensions.Width)x$($dimensions.Height), formato $($prefs.AspectMode), posicao $x,$y")
+        }
+    }catch{Log 'AVISO' ('Nao foi possivel aplicar o perfil de janela ao RetroArch: '+$_.Exception.Message)}
+    $args=$cfgArg+$screenArg+'-L '+(HydraRetroArchQuote $core)+' '+(HydraRetroArchQuote $rom)
+    Log 'INFO' ("Usando RetroArch D3D11 para $($plan.System): $args")
+    return @{Mode='retroarch';Exe=$fallbackExe;Arguments=$args;System=$plan.System;Rom=$rom;Fallback=$true}
+}
 function HydraRendererInput([string]$key,$dialog){
     if(-not $dialog -or $dialog.IsDisposed){return}
     $state=$dialog.Tag
@@ -14,23 +55,25 @@ function HydraRendererInput([string]$key,$dialog){
     }
     [void]$state.Buttons[$state.Index].Focus()
 }
-function HydraCreateRendererDialog([string]$gameName,[string]$previous,[string]$system='ps2'){
-    $sysLabel=switch($system){'n64'{'Nintendo 64'}'gamecube'{'GameCube'}'neogeo'{'Neo Geo'}default{'PS2'}}
-    $dialog=New-Object Windows.Forms.Form -Property @{Text="$sysLabel - Selecione o Motor de Execucao";StartPosition='CenterParent';ClientSize='600,370';FormBorderStyle='FixedDialog';MaximizeBox=$false;MinimizeBox=$false;ShowInTaskbar=$false;KeyPreview=$true;BackColor=[Drawing.Color]::FromArgb(13,18,28);ForeColor=[Drawing.Color]::White;Font=(New-Object Drawing.Font('Segoe UI',11))}
-    $title=New-Object Windows.Forms.Label -Property @{Text="Como deseja executar este jogo de $sysLabel?";Left=25;Top=20;Width=550;Height=35;Font=(New-Object Drawing.Font('Segoe UI',16,[Drawing.FontStyle]::Bold))}
+function HydraCreateRendererDialog([string]$gameName,[string]$previous,[string]$system='ps2',[bool]$backendOnly=$false){
+    $sysLabel=switch($system){'3do'{'3DO'}'arcade'{'Arcade'}'atari2600'{'Atari 2600'}'dreamcast'{'Dreamcast'}'gameboy'{'Game Boy'}'gameboycolor'{'Game Boy Color'}'gamegear'{'Game Gear'}'gba'{'Game Boy Advance'}'genesis'{'Genesis'}'megacd'{'Mega CD'}'n64'{'Nintendo 64'}'neogeo'{'Neo Geo'}'nes'{'Nintendo'}'pce'{'TurboGrafx-16'}'ps2'{'PlayStation 2'}'psx'{'PlayStation'}'saturn'{'Saturn'}'sms'{'Master System'}'snes'{'Super Nintendo'}'gamecube'{'GameCube'}default{$system}}
+    $dialog=New-Object Windows.Forms.Form -Property @{Text="$sysLabel - Como quer rodar?";StartPosition='CenterParent';ClientSize='600,370';FormBorderStyle='FixedDialog';MaximizeBox=$false;MinimizeBox=$false;ShowInTaskbar=$false;KeyPreview=$true;BackColor=[Drawing.Color]::FromArgb(13,18,28);ForeColor=[Drawing.Color]::White;Font=(New-Object Drawing.Font('Segoe UI',11))}
+    $title=New-Object Windows.Forms.Label -Property @{Text="Como quer rodar este jogo de $sysLabel?";Left=25;Top=20;Width=550;Height=35;Font=(New-Object Drawing.Font('Segoe UI',16,[Drawing.FontStyle]::Bold))}
     $name=New-Object Windows.Forms.Label -Property @{Text=$gameName;Left=27;Top=62;Width=545;Height=28;AutoEllipsis=$true}
     $hint=New-Object Windows.Forms.Label -Property @{Text='Direcional: escolher   A / Start / Enter: jogar   B / Esc: cancelar';Left=26;Top=326;Width=550;Height=30;ForeColor=[Drawing.Color]::Silver;Font=(New-Object Drawing.Font('Segoe UI',9))}
     $dialog.Controls.AddRange(@($title,$name,$hint))
-    
     $values=@('software','hardware','opengl');$labels=@('Software','Vulkan','OpenGL')
-    if($system -eq 'gamecube'){
-        $values=@('dolphin','hydra')
-        $labels=@('Dolphin Integrado (DirectX 11 - Recomendado)','Hydra Core (Vulkan - Nativo)')
-    } elseif($system -eq 'neogeo'){
+    if($system -eq 'n64'){
+        $values=@('opengl','vulkan');$labels=@('Hydra Software (Angrylion)','Hydra Vulkan (ParaLLEl)')
+    }elseif($system -eq 'gamecube'){
+        $values=@('opengl','vulkan','software');$labels=@('Hydra OpenGL','Hydra Vulkan','Hydra Software')
+    }elseif($system -eq 'dreamcast'){
+        $values=@('opengl','vulkan');$labels=@('Hydra OpenGL','Hydra Vulkan')
+    }elseif($system -eq 'neogeo'){
         $values=@('aes','mvs');$labels=@('Console (AES)','Arcade (MVS)')
         $dialog.Text='Neo Geo - Como quer jogar?';$title.Text='Como quer jogar este jogo de Neo Geo?'
     }
-    
+    if($backendOnly){$values=@('hydra','retroarch');$labels=@('Hydra','RetroArch D3D11')}
     $dialog.ClientSize=New-Object Drawing.Size(600,(157+71*$values.Count))
     $hint.Top=113+71*$values.Count
     $index=[Array]::IndexOf($values,$previous);if($index -lt 0){$index=0}
@@ -53,15 +96,33 @@ function HydraCreateRendererDialog([string]$gameName,[string]$previous,[string]$
 function HydraChooseStartupOption($game,[string]$system){
     $path=Join-Path $DataDir 'hydra-inicializacao.json'
     $saved=ReadJson $path $false
-    $key=switch($system){'ps2'{'PS2Renderer'}'n64'{'N64Renderer'}'gamecube'{'GameCubeEngine'}default{'NeoGeoMode'}}
+    $key=switch($system){'ps2'{'PS2Renderer'}'n64'{'N64Renderer'}'gamecube'{'GameCubeRenderer'}'dreamcast'{'DreamcastRenderer'}'neogeo'{'NeoGeoMode'}default{''}}
     $previous=if($saved -and $saved.PSObject.Properties[$key]){[string]$saved.$key}else{''}
+    $backendKey=if($system){$system+'Backend'}else{$null};$backendChoice=$null
+    if($system){
+        $backendPrevious=if($saved -and $saved.PSObject.Properties[$backendKey]){[string]$saved.$backendKey}else{''}
+        $backendDialog=HydraCreateRendererDialog $game.Name $backendPrevious $system $true
+        try{
+            if($backendDialog.ShowDialog($form) -ne 'OK'){return $null}
+            $backendChoice=[string]$backendDialog.Tag.Choice
+        }finally{$backendDialog.Dispose()}
+        if($backendChoice -eq 'retroarch'){
+            $preferences=@{}
+            if($saved){foreach($field in $saved.PSObject.Properties){$preferences[$field.Name]=[string]$field.Value}}
+            $preferences[$backendKey]=$backendChoice;[void](WriteJson $path $preferences 3);return $backendChoice
+        }
+        if($system -notin @('ps2','n64','gamecube','dreamcast','neogeo')){
+            $preferences=@{};if($saved){foreach($field in $saved.PSObject.Properties){$preferences[$field.Name]=[string]$field.Value}};$preferences[$backendKey]='hydra';[void](WriteJson $path $preferences 3);return 'hydra'
+        }
+    }
     $dialog=HydraCreateRendererDialog $game.Name $previous $system
     $script:HydraRendererDialog=$dialog
     try{
         if($dialog.ShowDialog($form) -ne 'OK'){return $null}
         $choice=[string]$dialog.Tag.Choice
         $preferences=@{}
-        foreach($field in @('PS2Renderer','N64Renderer','GameCubeEngine','NeoGeoMode')){if($saved -and $saved.PSObject.Properties[$field]){$preferences[$field]=[string]$saved.$field}}
+        if($saved){foreach($field in $saved.PSObject.Properties){$preferences[$field.Name]=[string]$field.Value}}
+        if($backendKey){$preferences[$backendKey]='hydra'}
         $preferences[$key]=$choice
         [void](WriteJson $path $preferences 3)
         return $choice
@@ -72,65 +133,42 @@ function HydraGetLaunchPlan($game,[string]$exe) {
     if([IO.Path]::GetFileName($exe) -ine 'hydra.exe'){return @{Mode='direct';Arguments=$arguments}}
     $systemId=[string]$game.HydraSystemId
     if(-not $systemId -and $arguments -match '^--boot\s+([a-z0-9]+)\s+'){ $systemId=$Matches[1] }
-    if($systemId -notin @('ps2','neogeo','gamecube')){return @{Mode='direct';Arguments=$arguments}}
+    if($systemId -notin @('3do','arcade','atari2600','dreamcast','gameboy','gameboycolor','gamegear','gba','genesis','gamecube','megacd','n64','neogeo','nes','pce','ps2','psx','saturn','sms','snes')){return @{Mode='direct';Arguments=$arguments}}
     if($arguments -notmatch '^--boot\s+(?<system>[a-z0-9]+)\s+"(?<rom>[^"\r\n]+)"\s*$'){throw 'Comando da ROM invalido para abertura direta.'}
     $rom=$Matches['rom'];$argumentSystem=$Matches['system']
     if($argumentSystem -ne $systemId){throw 'O sistema do jogo nao corresponde ao comando da ROM.'}
-    if($systemId -eq 'neogeo' -and [IO.Path]::GetExtension($rom) -ine '.neo'){return @{Mode='direct';Arguments=$arguments}}
     return @{Mode='bridge-choice';Arguments=$arguments;System=$systemId;Rom=$rom}
 }
 function HydraLoadDirectBridge {
     if(-not ('HydraDirectBridge' -as [type])){
-        $dll=Join-Path $Arq 'HydraDirectBridge.dll'
-        if([IO.File]::Exists($dll)){
-            Add-Type -Path $dll -ErrorAction Stop
-        } else {
-            $cs=Join-Path $Arq 'HydraDirectBridge.cs'
-            Add-Type -Path $cs -ReferencedAssemblies System.Web.Extensions -ErrorAction Stop
-        }
+        $dll=Join-Path $Arq 'HydraDirectBridge.dll'; if(-not [IO.File]::Exists($dll)){$dll=Join-Path $Arq 'HydraDirectBridge.dll'; if(-not [IO.File]::Exists($dll)){$dll=Join-Path $Arq 'HydraDirectBridge.dll'; if(-not [IO.File]::Exists($dll)){$dll=Join-Path $Arq 'HydraDirectBridge.dll'}}}
+        if(-not [IO.File]::Exists($dll)){throw 'Adaptador de abertura direta ausente. Reinstale o TarginoRetroStation.'}
+        Add-Type -Path $dll -ErrorAction Stop
     }
 }
 function HydraExitMessage($entry,[int]$code){
     $hex='0x'+([BitConverter]::ToUInt32([BitConverter]::GetBytes($code),0)).ToString('X8')
     $system=[string]$entry.Game.HydraSystemId
     $text="O emulador encerrou durante a execucao de '$($entry.Name)'.`r`nCodigo: $code ($hex)."
-    if($system -eq 'gamecube'){$text+="`r`nSistema: GameCube. Caso o motor Hydra falhe neste computador, selecione 'Dolphin Integrado (DirectX 11)' ao iniciar o jogo."}
-    elseif($system -eq 'ps2'){$text+="`r`nSistema: PlayStation 2. Confira a opcao de renderizacao escolhida."}
+    if($system -in @('n64','gamecube','dreamcast','ps2')){$text+="`r`nCaso falhe em Vulkan, selecione 'Hydra OpenGL' ao iniciar o jogo."}
     $text+="`r`nConsulte TarginoRetroStation\Logs\launcher.log."
     return $text
 }
 function HydraPrepareLaunch($game,[string]$exe) {
     $plan=HydraGetLaunchPlan $game $exe
     if($plan.Mode -eq 'direct'){return $plan}
-    if($plan.System -eq 'gamecube'){
-        $choice=HydraChooseStartupOption $game 'gamecube'
-        if(-not $choice){return $null}
-        if($choice -eq 'dolphin'){
-            $standalonePaths = @(
-                (Join-Path $PSScriptRoot 'Emuladores\Dolphin-x64\Dolphin.exe'),
-                'D:\Games\Dolphin-x64\Dolphin.exe',
-                (Join-Path $HydraRoot 'emuladores\Dolphin-x64\Dolphin.exe'),
-                'C:\Program Files\Dolphin\Dolphin.exe'
-            )
-            foreach($candidate in $standalonePaths){
-                if([IO.File]::Exists($candidate)){
-                    $plan.Exe = $candidate
-                    $plan.Arguments = "-b -e `"$($plan.Rom)`""
-                    $plan.Mode = 'direct'
-                    Log 'INFO' "GameCube redirecionado para Dolphin Integrado (DirectX 11): $candidate"
-                    return $plan
-                }
-            }
-            Log 'AVISO' 'Dolphin Integrado nao encontrado nas pastas relativas; usando Hydra padrao.'
-        }
-        $plan.Mode = 'direct'
-        return $plan
+    $choice=HydraChooseStartupOption $game $plan.System
+    if(-not $choice){return $null}
+    if($choice -eq 'retroarch'){
+        $fallback=HydraRetroArchFallbackPlan $plan
+        if($fallback){return $fallback}
+        [void][Windows.Forms.MessageBox]::Show($form,'RetroArch nao esta configurado. Verifique Dados\retroarch-fallback.json e tente novamente.','RetroArch nao encontrado')
+        return $null
     }
+    if($choice -eq 'hydra' -and $plan.System -notin @('ps2','n64','gamecube','dreamcast','neogeo')){return @{Mode='direct';Arguments=$plan.Arguments}}
     HydraLoadDirectBridge
     $reason=[HydraDirectBridge]::GetCompatibilityReason($exe,[string]$plan.System)
     if($reason){return (HydraOfferNativeMenu $plan $reason)}
-    $choice=HydraChooseStartupOption $game $plan.System
-    if(-not $choice){return $null}
     $plan.Choice=$choice;$plan.Mode='bridge'
     return $plan
 }
@@ -138,6 +176,10 @@ function HydraOfferNativeMenu($plan,[string]$reason){
     Log 'AVISO' ('Motor nao reconhecido para abertura direta: '+$reason)
     [void][Windows.Forms.MessageBox]::Show($form,'Este motor nao foi reconhecido para abertura direta. Configure o motor antes de jogar.','Targino RetroStation - Motor')
     return $null
+}
+function HydraNativeFallbackPlan($plan,[bool]$accepted){
+    if(-not $accepted){return $null}
+    return @{Mode='direct';Arguments='';System=$plan.System;NativeMenu=$true}
 }
 function HydraStartDirectProcess([string]$exe,$plan){
     Log 'INFO' ("Abertura direta '$($plan.System)' / '$($plan.Choice)': $($plan.Arguments); sem navegacao simulada")

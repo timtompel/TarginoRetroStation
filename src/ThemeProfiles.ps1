@@ -1,4 +1,4 @@
-# Perfis visuais do Targino RetroStation.
+﻿# Perfis visuais do Targino RetroStation.
 # Este módulo altera apenas preferências de aparência; catálogo, controles e integração Hydra permanecem intactos.
 $script:ThemeProfiles = [ordered]@{
     'Moderno' = [ordered]@{

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Reflection;
 using System.Diagnostics;
@@ -8,8 +8,8 @@ using System.Web.Script.Serialization;
 
 [assembly: AssemblyTitle("Targino RetroStation - Instalador Web")]
 [assembly: AssemblyProduct("TarginoRetroStation")]
-[assembly: AssemblyVersion("1.5.19.0")]
-[assembly: AssemblyInformationalVersion("1.5.19")]
+[assembly: AssemblyVersion("1.5.21.0")]
+[assembly: AssemblyInformationalVersion("1.5.21")]
 public sealed class Bootstrapper : Form
 {
     Label status; ProgressBar progress; Button start,cancel; Timer timer;

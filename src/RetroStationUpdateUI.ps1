@@ -1,4 +1,4 @@
-# Separate stable channel. Network/download work runs in another process, not the game UI.
+﻿# Separate stable channel. Network/download work runs in another process, not the game UI.
 function Start-RetroStationUpdate([switch]$Automatic){
     if($script:RetroUpdateProcess -and -not $script:RetroUpdateProcess.HasExited){return}
     if(@($script:Runs).Count -gt 0 -or @($script:Play.Values).Count -gt 0 -or $script:TarginoMusicLaunchPending){

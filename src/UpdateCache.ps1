@@ -1,4 +1,4 @@
-function Clear-RetroStationUpdateCache([string]$Folder){
+﻿function Clear-RetroStationUpdateCache([string]$Folder){
     if(-not [IO.Directory]::Exists($Folder)){return}
     $base=Get-Item -LiteralPath $Folder
     if($base.Attributes -band [IO.FileAttributes]::ReparsePoint){return}

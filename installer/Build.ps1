@@ -1,7 +1,7 @@
-﻿param()
+param()
 $ErrorActionPreference='Stop'
 $project=Split-Path $PSScriptRoot
-$version = '1.5.19'
+$version = '1.5.21'
 $out=Join-Path $project 'dist'
 $stage=Join-Path $project ('build\'+[guid]::NewGuid().ToString('N'))
 $addon=Join-Path $stage 'TarginoRetroStation'
@@ -13,6 +13,7 @@ Copy-Item -Path (Join-Path $project 'src\*') -Destination $addon
 foreach($name in @('avatar.png','banner.png','fundo.jpg')){Copy-Item -LiteralPath (Join-Path $project ('assets\'+$name)) -Destination (Join-Path $addon 'Marca')}
 Copy-Item -LiteralPath (Join-Path $project 'assets\Launcher.ico') -Destination $addon
 Copy-Item -LiteralPath (Join-Path $project 'assets\layout.template.json') -Destination (Join-Path $addon 'Dados')
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'retroarch-fallback.json') -Destination (Join-Path $addon 'Dados')
 Copy-Item -LiteralPath (Join-Path $project 'docs\Manual.html') -Destination $addon
 Copy-Item -LiteralPath (Join-Path $project 'README.md') -Destination (Join-Path $addon 'LEIA-ME.txt')
 & $csc /nologo /target:library /platform:x64 /optimize+ /r:System.Web.Extensions.dll ('/out:'+(Join-Path $addon 'HydraDirectBridge.dll')) (Join-Path $addon 'HydraDirectBridge.cs')

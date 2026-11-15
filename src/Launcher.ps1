@@ -1,5 +1,5 @@
-﻿Add-Type -AssemblyName System.Windows.Forms, System.Drawing
-$AppVer = '1.5.19'
+Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+$AppVer = '1.5.21'
 $script:T0 = [Diagnostics.Stopwatch]::StartNew()      # tempo de abertura (vai para o log e para o diagnóstico)
 # O Launcher.ps1 fica em TarginoRetroStation\; a pasta do launcher ($Root) é a de cima (onde ficam só o executável e Jogos\).
 #  Tudo é relativo a $Root: a pasta pode ser copiada para outro HD ou renomeada.
@@ -826,7 +826,7 @@ function GameStart($gm) {
         $a = $launchArguments; if ($a) { $psi.Arguments = $a; Log 'INFO' "Argumentos de '$($gm.Name)': $a" }
         $pr = if($launchPlan.Mode -eq 'bridge'){HydraStartDirectProcess $exe $launchPlan}else{[Diagnostics.Process]::Start($psi)}
         Log 'INFO' ("Jogo '$($gm.Name)' iniciado" + $(if ($pr) { " (processo $($pr.Id))" }))
-        try { PlayBegin $gm $pr } catch { LogEx 'AVISO' "Não foi possível acompanhar '$($gm.Name)': $($_.Exception.Message)" $_; if ($pr) { $pr.Dispose() } }   # capa mostra que está abrindo/rodando (v2.36.0)
+        try { PlayBegin $gm $pr ([IO.Path]::GetFileName($exe) -ieq 'hydra.exe') ($launchPlan.Mode -eq 'retroarch') } catch { LogEx 'AVISO' "Não foi possível acompanhar '$($gm.Name)': $($_.Exception.Message)" $_; if ($pr) { $pr.Dispose() } }   # capa mostra que está abrindo/rodando (v2.36.0)
     } catch {
         LogEx 'ERRO' "Falha ao iniciar '$($gm.Name)': $($_.Exception.Message)" $_
         [void][Windows.Forms.MessageBox]::Show($_.Exception.Message, 'Erro')
@@ -969,23 +969,27 @@ function PlayDir($gm) {   # pasta do jogo para procurar processos ('' se for amp
 function PlayPids($p) {   # processos do jogo agora
     , ([GameProc]::Track([int[]]@($p.Pids), "$($p.Dir)", $PID))
 }
-function PlayBegin($gm, $pr) {
+function PlayBegin($gm, $pr, $isHydra=$null, [bool]$isRetroArch=$false) {
     $id = "$($gm.Id)"
     $pids = @(); if ($pr) { try { $pids = @([int]$pr.Id) } catch { $Error.Clear() } }
+    if($null -eq $isHydra){$isHydra=($pr -and [IO.Path]::GetFileName((ExePath $gm)) -ieq 'hydra.exe')}
     $script:Play[$id] = @{ Id = $id; Name = "$($gm.Name)"; Game = $gm; Pids = [int[]]$pids; Dir = (PlayDir $gm); Start = (Get-Date); Phase = 'start'; Empty = 0; Idx = -1; Proc = $pr }
-    if ($pr -and [IO.Path]::GetFileName((ExePath $gm)) -ieq 'hydra.exe') {
+    if ($pr -and ($isHydra -or $isRetroArch)) {
         $entry = $script:Play[$id]
-        $entry.Hydra = $true
-        $entry.CoreSeen = $false
-        $entry.CoreMissing = 0
-        $entry.ReturnRequested = $null
-        $entry.ModuleErrorLogged = $false
-        $entry.GameSeen = $false
-        $entry.ReturnObserver = $null
-        try {
-            HydraLoadDirectBridge
+        $entry.LiveWindow = $true
+        if($isHydra){
+            $entry.Hydra = $true
+            $entry.CoreSeen = $false
+            $entry.CoreMissing = 0
+            $entry.ReturnRequested = $null
+            $entry.ModuleErrorLogged = $false
+            $entry.GameSeen = $false
             $entry.ReturnObserver = $null
-        } catch { Log 'AVISO' 'Estado nativo de retorno indisponivel; usando acompanhamento do core.' }
+            try {
+                HydraLoadDirectBridge
+                $entry.ReturnObserver = $null
+            } catch { Log 'AVISO' 'Estado nativo de retorno indisponivel; usando acompanhamento do core.' }
+        }
         $entry.WindowState = $form.WindowState
         if ($hydraReturnTm) { $hydraReturnTm.Start() }
     }
@@ -994,7 +998,7 @@ function PlayBegin($gm, $pr) {
 }
 function PlayEnd($id, $why) {
     $p = $script:Play[$id]; if (-not $p) { return }
-    if($p.Hydra -and (Get-Command HydraLiveEnd -ErrorAction SilentlyContinue)){try{HydraLiveEnd $p}catch{Log 'AVISO' 'Nao foi possivel concluir a memoria do tamanho da janela.'}}
+    if(($p.Hydra -or $p.LiveWindow) -and (Get-Command HydraLiveEnd -ErrorAction SilentlyContinue)){try{HydraLiveEnd $p}catch{Log 'AVISO' 'Nao foi possivel concluir a memoria do tamanho da janela.'}}
     $nativeExit=$null
     TileInvalidate $script:Play[$id] $id
     $script:Play.Remove($id)
@@ -1034,7 +1038,10 @@ function HydraReturnTick {
         try {
             $entry.Proc.Refresh()
             if ($entry.Proc.HasExited) { PlayEnd $id 'fechou'; continue }
-            if(Get-Command HydraLiveTick -ErrorAction SilentlyContinue){HydraLiveTick $entry}
+            if(Get-Command HydraLiveTick -ErrorAction SilentlyContinue){
+                $sys = if ($entry.Game.HydraSystemId) { [string]$entry.Game.HydraSystemId } elseif ($entry.Game.Args -match '--boot\s+([a-z0-9]+)') { $Matches[1] } else { '' }
+                if ($sys -notin @('dreamcast','gamecube')) { HydraLiveTick $entry }
+            }
             if ($null -ne $entry.ReturnRequested) {
                 # Fecha de forma normal para o Hydra concluir a gravação de saves.
                 $closingSeconds=((Get-Date) - $entry.ReturnRequested).TotalSeconds
